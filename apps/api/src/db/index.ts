@@ -1,30 +1,36 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
-import { runMigrations } from './migrations.js'
+import postgres, { type Sql } from 'postgres'
 
-export type Database = DatabaseSync
+/** Minimal database surface the app depends on (tests inject a fake). */
+export interface Database {
+  /** Resolves when the database answers `select 1`, rejects otherwise. */
+  ping(): Promise<void>
+  close(): Promise<void>
+}
 
-/** Opens (and migrates) the database described by a `DATABASE_URL` (`file:<path>` or `:memory:`). */
-export function openDatabase(url: string): Database {
-  const inMemory = url === ':memory:' || url === 'file::memory:'
-  let db: DatabaseSync
-  if (inMemory) {
-    db = new DatabaseSync(':memory:')
-  } else {
-    if (!url.startsWith('file:')) {
-      throw new Error('DATABASE_URL must be ":memory:" or start with "file:" (SQLite only)')
-    }
-    const path = resolve(url.slice('file:'.length))
-    // Owner-only: the database holds password hashes and session hashes.
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
-    // Create the file as 0600 up front so the WAL/SHM files SQLite derives from it are private too.
-    writeFileSync(path, '', { flag: 'a', mode: 0o600 })
-    db = new DatabaseSync(path)
-    chmodSync(path, 0o600)
-    db.exec('PRAGMA journal_mode=WAL')
+export interface PostgresDatabase extends Database {
+  /** Tagged-template client. App tables live in the private `switchyard` schema. */
+  sql: Sql
+}
+
+/** Creates the Postgres client. Connections are lazy: nothing is opened until the first query. */
+export function openDatabase(
+  url: string,
+  ssl: 'require' | 'disable' = 'require',
+): PostgresDatabase {
+  const sql = postgres(url, {
+    ssl: ssl === 'require' ? 'require' : false,
+    max: 5,
+    connect_timeout: 5,
+    idle_timeout: 30,
+    onnotice: () => {},
+  })
+  return {
+    sql,
+    async ping() {
+      await sql`select 1`
+    },
+    async close() {
+      await sql.end({ timeout: 5 })
+    },
   }
-  db.exec('PRAGMA foreign_keys=ON')
-  runMigrations(db)
-  return db
 }

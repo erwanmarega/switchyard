@@ -1,6 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import type { Database } from '../db/index.js'
-import { findSessionUser, SESSION_COOKIE, type AuthUser } from './sessions.js'
+import type { AuthUser, TokenVerifier } from './jwt.js'
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -8,11 +7,13 @@ declare module 'fastify' {
   }
 }
 
-/** Builds a preHandler that sets `request.user` or replies 401. */
-export function createRequireAuth(db: Database) {
+const BEARER = /^Bearer ([A-Za-z0-9\-._~+/]+=*)$/
+
+/** Builds a preHandler that sets `request.user` from the Bearer access token or replies 401. */
+export function createRequireAuth(verify: TokenVerifier) {
   return async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
-    const token = request.cookies[SESSION_COOKIE]
-    const user = token ? findSessionUser(db, token) : null
+    const token = request.headers.authorization?.match(BEARER)?.[1]
+    const user = token ? await verify(token) : null
     if (!user) {
       return reply.code(401).send({ error: 'Non authentifié' })
     }

@@ -1,29 +1,22 @@
+import { AuthFlowError, apiErrorMessage, isUnauthorized } from '~/utils/auth-errors'
+
 export interface AuthUser {
   id: string
   email: string
 }
 
-interface ApiErrorBody {
-  error?: string
-  issues?: { path: string; message: string }[]
+export type RegisterResult =
+  { status: 'signed-in'; user: AuthUser } | { status: 'confirmation-required' }
+
+interface CredentialsResponse {
+  user?: AuthUser
+  status?: 'confirm_email'
 }
 
-/** Extracts a French, user-facing message from a failed API call. */
-export function apiErrorMessage(err: unknown): string {
-  const data = (err as { data?: ApiErrorBody } | null)?.data
-  if (data?.error) {
-    const details = data.issues?.map((i) => i.message).filter(Boolean) ?? []
-    return details.length ? `${data.error} ${details.join(' ')}` : data.error
-  }
-  return 'Impossible de joindre le serveur. Réessayez dans un instant.'
-}
-
-/** True when a failed API call was rejected because the session is missing or expired. */
-export function isUnauthorized(err: unknown): boolean {
-  const e = err as { statusCode?: number; status?: number; response?: { status?: number } } | null
-  return (e?.statusCode ?? e?.status ?? e?.response?.status) === 401
-}
-
+/**
+ * Session state and actions. The browser never talks to Supabase nor holds its tokens: the
+ * session lives in HttpOnly cookies managed by the /auth/* server routes.
+ */
 export function useAuth() {
   const user = useState<AuthUser | null>('auth-user', () => null)
   const router = useRouter()
@@ -39,37 +32,53 @@ export function useAuth() {
     return true
   }
 
-  /** Loads the current session user. On SSR the incoming cookie is forwarded. */
+  /**
+   * Resolves the current user from a verified source only. On the server this is the user the
+   * session middleware validated for this request; in the browser, `GET /auth/session`.
+   */
   async function fetchUser(): Promise<AuthUser | null> {
-    if (import.meta.server && !useRequestHeaders(['cookie']).cookie?.includes('sy_session=')) {
-      user.value = null
-      return null
-    }
-    const request = import.meta.server ? useRequestFetch() : $fetch
     try {
-      const res = await request<{ user: AuthUser }>('/api/auth/me')
-      user.value = res.user
+      if (import.meta.server) {
+        user.value = (useRequestEvent()?.context.authUser as AuthUser | null | undefined) ?? null
+      } else {
+        const data = await $fetch<{ user: AuthUser | null }>('/auth/session', {
+          headers: { accept: 'application/json' },
+        })
+        user.value = data.user
+      }
     } catch {
       user.value = null
     }
     return user.value
   }
 
-  async function authenticate(path: 'login' | 'register', email: string, password: string) {
-    const res = await $fetch<{ user: AuthUser }>(`/api/auth/${path}`, {
-      method: 'POST',
-      body: { email, password },
-    })
-    user.value = res.user
-    return res.user
+  async function post(path: string, body: { email: string; password: string }) {
+    try {
+      return await $fetch<CredentialsResponse>(path, { method: 'POST', body })
+    } catch (err) {
+      const code = (err as { data?: { code?: string } } | null)?.data?.code
+      throw new AuthFlowError(apiErrorMessage(err), code)
+    }
   }
 
-  const login = (email: string, password: string) => authenticate('login', email, password)
-  const register = (email: string, password: string) => authenticate('register', email, password)
+  async function login(email: string, password: string): Promise<AuthUser> {
+    const data = await post('/auth/login', { email, password })
+    if (!data.user) throw new AuthFlowError(apiErrorMessage(null))
+    user.value = data.user
+    return data.user
+  }
+
+  async function register(email: string, password: string): Promise<RegisterResult> {
+    const data = await post('/auth/signup', { email, password })
+    // No session means email confirmation is required: the visitor is not logged in yet.
+    if (!data.user) return { status: 'confirmation-required' }
+    user.value = data.user
+    return { status: 'signed-in', user: data.user }
+  }
 
   async function logout(): Promise<void> {
     try {
-      await $fetch('/api/auth/logout', { method: 'POST' })
+      await $fetch('/auth/logout', { method: 'POST' })
     } finally {
       user.value = null
     }

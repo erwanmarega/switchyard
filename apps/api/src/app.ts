@@ -1,5 +1,3 @@
-import cookie from '@fastify/cookie'
-import rateLimit from '@fastify/rate-limit'
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -7,9 +5,7 @@ import Fastify, {
   type FastifyRequest,
 } from 'fastify'
 import { createRequireAuth } from './auth/guard.js'
-import { registerAuthRoutes } from './auth/routes.js'
-import { deleteExpiredSessions } from './auth/sessions.js'
-import type { ScryptParams } from './auth/passwords.js'
+import { createTokenVerifier, remoteKeySet, type TokenVerifier } from './auth/jwt.js'
 import { loadConfig, type Config } from './config.js'
 import { openDatabase, type Database } from './db/index.js'
 import { createDefaultRegistry, type IntegrationRegistry } from './integrations/registry.js'
@@ -20,9 +16,10 @@ export interface BuildAppOptions {
   logger?: boolean
   registry?: IntegrationRegistry
   config?: Config
+  /** Defaults to a lazy Postgres client built from `config.DATABASE_URL`. */
   db?: Database
-  /** scrypt parameters; only tests lower them for speed. */
-  passwordParams?: ScryptParams
+  /** Defaults to local verification against the Supabase JWKS; tests inject their own keys. */
+  verifyToken?: TokenVerifier
 }
 
 declare module 'fastify' {
@@ -31,9 +28,8 @@ declare module 'fastify' {
   }
 }
 
-export const SESSION_SWEEP_INTERVAL_MS = 60 * 60 * 1000
-
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+const HEALTH_DB_TIMEOUT_MS = 3000
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const config = options.config ?? loadConfig()
@@ -41,32 +37,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     trustProxy: config.TRUST_PROXY,
     logger: options.logger
       ? {
-          // Never log credentials, session tokens or request bodies carrying passwords.
-          redact: [
-            'req.headers.cookie',
-            'req.headers.authorization',
-            'res.headers["set-cookie"]',
-            'req.body.password',
-          ],
+          // Never log credentials or access tokens.
+          redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
         }
       : false,
   })
   const registry = options.registry ?? createDefaultRegistry()
-  const db = options.db ?? openDatabase(config.DATABASE_URL)
-  // Expired sessions are only deleted lazily on lookup: sweep them at startup and hourly.
-  const sweep = () => {
-    try {
-      deleteExpiredSessions(db)
-    } catch (err) {
-      app.log.error(err, 'session sweep failed')
-    }
-  }
-  sweep()
-  const sweepTimer = setInterval(sweep, SESSION_SWEEP_INTERVAL_MS)
-  sweepTimer.unref()
+  const db = options.db ?? openDatabase(config.DATABASE_URL, config.DATABASE_SSL)
+  const verifyToken =
+    options.verifyToken ??
+    createTokenVerifier(config.SUPABASE_URL, remoteKeySet(config.SUPABASE_URL))
   app.addHook('onClose', async () => {
-    clearInterval(sweepTimer)
-    db.close()
+    await db.close()
   })
 
   // Never leak real error details: 5xx get a generic message (the cause is logged), while
@@ -80,23 +62,17 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     return reply.code(status).send(error)
   })
 
-  // Auth data must never be stored by browsers, proxies or CDNs.
+  // Per-user data must never be stored by browsers, proxies or CDNs.
   app.addHook('onSend', async (request, reply) => {
     const path = request.url.split('?')[0]
-    if (path === '/api/integrations' || path?.startsWith('/api/auth/')) {
+    if (path?.startsWith('/api/')) {
       reply.header('cache-control', 'private, no-store')
     }
   })
 
-  app.register(cookie)
-  if (config.AUTH_RATE_LIMIT_MAX > 0) {
-    app.register(rateLimit, { global: false, errorResponseBuilder: rateLimitError })
-  }
-
-  // CSRF posture: state-changing routes only accept `application/json` bodies (Fastify's
-  // default parsers reject other content types, so plain HTML forms cannot reach them),
-  // the session cookie is SameSite=Lax (not sent on cross-site POSTs), and any request
-  // carrying an `Origin` header outside ALLOWED_ORIGINS is rejected below.
+  // CSRF posture: the API authenticates with a Bearer token that the browser never attaches on
+  // its own (the web proxy injects it), state-changing routes only accept `application/json`,
+  // and any request carrying an `Origin` header outside ALLOWED_ORIGINS is rejected below.
   const allowedOrigins = new Set(config.ALLOWED_ORIGINS)
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
@@ -106,14 +82,29 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   })
 
   app.decorateRequest('user', null)
-  app.decorate('requireAuth', createRequireAuth(db))
+  app.decorate('requireAuth', createRequireAuth(verifyToken))
 
-  app.get('/health', async () => ({ status: 'ok', version: VERSION }))
+  app.get('/health', async (request, reply) => {
+    try {
+      let timer: NodeJS.Timeout | undefined
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('db ping timeout')), HEALTH_DB_TIMEOUT_MS)
+      })
+      try {
+        await Promise.race([db.ping(), timeout])
+      } finally {
+        clearTimeout(timer)
+      }
+      return { status: 'ok', version: VERSION, db: 'ok' }
+    } catch (err) {
+      request.log.error(err, 'health check: database unreachable')
+      return reply.code(503).send({ status: 'degraded', db: 'down' })
+    }
+  })
 
-  // Registered as a plugin so @fastify/rate-limit's onRoute hook is active when routes are added.
-  app.register(async (scope) =>
-    registerAuthRoutes(scope, db, config, { passwordParams: options.passwordParams }),
-  )
+  app.get('/api/me', { preHandler: app.requireAuth }, async (request) => ({
+    user: request.user,
+  }))
 
   app.get('/api/integrations', { preHandler: app.requireAuth }, async () => ({
     integrations: registry.list().map((i) => ({
@@ -124,11 +115,4 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }))
 
   return app
-}
-
-function rateLimitError() {
-  return {
-    statusCode: 429,
-    error: 'Trop de tentatives. Réessayez dans une minute.',
-  }
 }

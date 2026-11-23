@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { computed, definePageMeta, navigateTo, ref, useFetch, useHead, useRoute } from '#imports'
-import { apiErrorMessage, useAuth } from '~/composables/useAuth'
+import { computed, definePageMeta, navigateTo, ref, useHead, useRoute } from '#imports'
+import { useAuth } from '~/composables/useAuth'
+import {
+  CONFIRMATION_LINK_ERROR,
+  CONFIRM_EMAIL_NOTICE,
+  SIGNUP_CLOSED,
+  apiErrorMessage,
+} from '~/utils/auth-errors'
 import { postLoginTarget } from '~/utils/auth-guard'
 
 useHead({ title: 'Connexion — Switchyard' })
@@ -13,14 +19,13 @@ const MIN_PASSWORD_LENGTH = 10
 const route = useRoute()
 const { login, register } = useAuth()
 
-const { data: config } = await useFetch<{ registrationOpen: boolean }>('/api/auth/config')
-const registrationOpen = computed(() => config.value?.registrationOpen !== false)
-
 const mode = ref<Mode>('login')
 const email = ref('')
 const password = ref('')
 const confirmation = ref('')
-const error = ref('')
+const error = ref(route.query.error === 'confirmation' ? CONFIRMATION_LINK_ERROR : '')
+const notice = ref('')
+const signupClosed = ref(false)
 const loading = ref(false)
 
 const isRegister = computed(() => mode.value === 'register')
@@ -28,6 +33,7 @@ const isRegister = computed(() => mode.value === 'register')
 function setMode(next: Mode) {
   mode.value = next
   error.value = ''
+  notice.value = ''
   password.value = ''
   confirmation.value = ''
 }
@@ -35,6 +41,7 @@ function setMode(next: Mode) {
 async function onSubmit() {
   if (loading.value) return
   error.value = ''
+  notice.value = ''
   if (isRegister.value) {
     if (password.value.length < MIN_PASSWORD_LENGTH) {
       error.value = `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`
@@ -47,11 +54,22 @@ async function onSubmit() {
   }
   loading.value = true
   try {
-    if (isRegister.value) await register(email.value, password.value)
-    else await login(email.value, password.value)
+    if (isRegister.value) {
+      const result = await register(email.value, password.value)
+      if (result.status === 'confirmation-required') {
+        // Email confirmation is on: the account is not logged in until the link is followed.
+        notice.value = CONFIRM_EMAIL_NOTICE
+        password.value = ''
+        confirmation.value = ''
+        return
+      }
+    } else {
+      await login(email.value, password.value)
+    }
     await navigateTo(postLoginTarget(route.query.redirect))
   } catch (err) {
     error.value = apiErrorMessage(err)
+    if ((err as { code?: string } | null)?.code === 'signup_disabled') signupClosed.value = true
   } finally {
     loading.value = false
   }
@@ -104,7 +122,6 @@ async function onSubmit() {
             Se connecter
           </button>
           <button
-            v-if="registrationOpen"
             type="button"
             class="tab"
             :class="{ active: isRegister }"
@@ -114,9 +131,7 @@ async function onSubmit() {
             Créer un compte
           </button>
         </div>
-        <p v-if="!registrationOpen" class="note">
-          La création de compte est fermée sur cette instance.
-        </p>
+        <p v-if="signupClosed" class="note">{{ SIGNUP_CLOSED }}</p>
 
         <form novalidate @submit.prevent="onSubmit">
           <div class="field">
@@ -163,6 +178,7 @@ async function onSubmit() {
 
           <div class="alert-area" role="alert">
             <p v-if="error" class="error">{{ error }}</p>
+            <p v-else-if="notice" class="notice">{{ notice }}</p>
           </div>
 
           <button class="btn btn-dark submit" type="submit" :disabled="loading">
@@ -286,6 +302,11 @@ input:disabled {
 .error {
   font-size: 14px;
   color: #a8340f;
+  font-weight: 500;
+}
+.notice {
+  font-size: 14px;
+  color: var(--prussian);
   font-weight: 500;
 }
 .submit {

@@ -21,7 +21,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:web": "npm run dev -w @switchyard/web",
-    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\""
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:env": "node scripts/sync-supabase-env.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
