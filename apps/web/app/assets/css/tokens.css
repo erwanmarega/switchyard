@@ -1,0 +1,147 @@
+:root {
+  --prussian: #1b3a8c;
+  --paper: #f4f1e8;
+  --navy-ink: #0b1640;
+  --signal: #d9541e;
+  --ink: #0b1640;
+  --line: rgba(27, 58, 140, 0.15);
+  --line-light: rgba(244, 241, 232, 0.28);
+
+  /* Status colors: product mockups only, never branding */
+  --status-ok: #2e8b57;
+  --status-warn: #e0a100;
+  --status-bad: #c0392b;
+
+  --font-pixel: 'Geist Pixel', 'Courier New', monospace;
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --frame: 1180px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 16px;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--navy-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-pixel);
+  font-weight: 400;
+  color: var(--prussian);
+  line-height: 0.95;
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+a {
+  color: inherit;
+}
+img {
+  display: block;
+  max-width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 3px;
+}
+
+/* Square buttons, small mono type */
+.btn {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1;
+  text-decoration: none;
+  padding: 11px 14px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+}
+.btn-light {
+  background: var(--paper);
+  color: var(--navy-ink);
+}
+.btn-dark {
+  background: var(--navy-ink);
+  color: var(--paper);
+}
+.btn-light:hover {
+  background: #fff;
+}
+.btn-dark:hover {
+  background: #16256b;
+}
+.btn:focus-visible {
+  outline-color: var(--paper);
+}
+
+/* Page frame: centred column with 1px guide lines on both sides */
+.frame {
+  width: min(100%, var(--frame));
+  margin-inline: auto;
+  border-inline: 1px solid var(--line);
+  background: var(--paper);
+}
+.frame > section {
+  border-top: 1px solid var(--line);
+}
+.frame > section:first-child {
+  border-top: 0;
+}
+.pad {
+  padding: 88px 40px;
+}
+.mono-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 820px) {
+  .pad {
+    padding: 56px 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

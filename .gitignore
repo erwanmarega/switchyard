@@ -1,4 +1,22 @@
 node_modules
 dist
-
-scripts/.raw/
+.output
+.nuxt
+coverage
+*.log
+.env
+.env.*
+!.env.example
+*.sqlite
+*.db
+apps/web/scripts/.raw/
+.DS_Store
+# SQLite sidecars and local data
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*-journal
+apps/api/data/
+# Key and certificate material
+*.pem
+*.key
