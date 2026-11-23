@@ -27,8 +27,10 @@ const marks = ['Vercel', 'Stripe', 'Cloudflare', 'Supabase', 'AWS', 'Resend']
         utilisateurs.
       </p>
       <div class="ctas">
-        <a class="btn btn-light" href="#">Suivre le projet sur GitHub</a>
-        <NuxtLink class="btn btn-dark" to="/#solution">Voir la démo du chemin</NuxtLink>
+        <a class="btn btn-light" href="#"><PixelIcon name="github" />Suivre le projet sur GitHub</a>
+        <NuxtLink class="btn btn-dark" to="/#solution"
+          >Voir la démo du chemin<PixelIcon name="arrow"
+        /></NuxtLink>
       </div>
     </div>
 

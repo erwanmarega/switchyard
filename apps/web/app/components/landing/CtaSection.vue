@@ -17,8 +17,8 @@
         bienvenus. Ouvrez une issue pour en discuter.
       </p>
       <div class="ctas">
-        <a class="btn btn-light" href="#">Ouvrir une issue</a>
-        <a class="btn btn-dark" href="#">Suivre sur GitHub</a>
+        <a class="btn btn-light" href="#"><PixelIcon name="issue" />Ouvrir une issue</a>
+        <a class="btn btn-dark" href="#"><PixelIcon name="github" />Suivre sur GitHub</a>
       </div>
     </div>
   </section>

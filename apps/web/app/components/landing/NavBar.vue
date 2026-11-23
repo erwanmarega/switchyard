@@ -48,14 +48,14 @@ const links = [
         </li>
       </ul>
       <div class="actions">
-        <a class="btn btn-light" href="#">GitHub</a>
+        <a class="btn btn-light" href="#"><PixelIcon name="github" />GitHub</a>
         <NuxtLink
           v-if="user"
           class="btn btn-light"
           to="/dashboard"
           data-testid="nav-account"
           @click="open = false"
-          >Tableau de bord</NuxtLink
+          ><PixelIcon name="dashboard" />Tableau de bord</NuxtLink
         >
         <NuxtLink
           v-else
@@ -63,9 +63,11 @@ const links = [
           to="/connexion"
           data-testid="nav-account"
           @click="open = false"
-          >Se connecter</NuxtLink
+          ><PixelIcon name="login" />Se connecter</NuxtLink
         >
-        <NuxtLink class="btn btn-dark" to="/#solution" @click="open = false">Démo</NuxtLink>
+        <NuxtLink class="btn btn-dark" to="/#solution" @click="open = false"
+          ><PixelIcon name="play" />Démo</NuxtLink
+        >
       </div>
     </nav>
   </header>
