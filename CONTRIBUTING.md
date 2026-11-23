@@ -34,6 +34,7 @@ Avant de demander une relecture, vérifiez que tout est vert en local (la CI ex�
 - [ ] `npm test`
 - [ ] `npm run build`
 - [ ] Des tests couvrent le nouveau comportement
+- [ ] Les nouvelles tables vont dans le schéma privé `switchyard` (migration dans `supabase/migrations/`) ; toute table `public` active la RLS
 - [ ] Aucun secret (clé d'API, token, `.env`) dans le code, les logs ou les commits
 
 ## Ajouter une intégration
@@ -51,6 +52,7 @@ Principe fondamental : **lecture seule**. Une vérification observe un outil et 
 
 ```bash
 npm install            # installe tous les workspaces
+npm run db:start       # Supabase local (Docker + CLI Supabase), puis npm run db:env une fois
 npm run dev            # app web (3000) : landing + dashboard, et API (3001)
 npm run lint           # ESLint (lint:fix pour corriger)
 npm run format         # Prettier (format:check pour vérifier)

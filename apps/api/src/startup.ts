@@ -1,16 +1,17 @@
 import { DEFAULT_ALLOWED_ORIGINS, type Config } from './config.js'
 
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
 /** Misconfigurations worth a warning when running in production. Empty outside production. */
 export function startupWarnings(config: Config): string[] {
   if (config.NODE_ENV !== 'production') return []
   const warnings: string[] = []
-  if (config.ALLOW_REGISTRATION) {
+  const supabase = new URL(config.SUPABASE_URL)
+  // https is enforced by loadConfig in production, so only the localhost case is left to warn about.
+  if (LOCAL_HOSTNAMES.has(supabase.hostname)) {
     warnings.push(
-      'open registration: anyone who can reach this instance can create an account (set ALLOW_REGISTRATION=false)',
+      'SUPABASE_URL points to localhost: use your hosted Supabase project in production',
     )
-  }
-  if (config.AUTH_RATE_LIMIT_MAX === 0) {
-    warnings.push('AUTH_RATE_LIMIT_MAX is 0: per-IP rate limiting of login/register is disabled')
   }
   const defaults = DEFAULT_ALLOWED_ORIGINS.split(',')
   const isDefault =

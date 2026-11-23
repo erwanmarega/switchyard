@@ -21,7 +21,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
 if (!LOOPBACK_HOSTS.has(config.HOST)) {
-  // Cookies are only protected in transit when COOKIE_SECURE is on and TLS is terminated upstream.
+  // Bearer tokens are only protected in transit when TLS is terminated upstream.
   app.log.warn({ host: config.HOST }, 'API bound to a non-loopback host: put it behind HTTPS')
 }
 

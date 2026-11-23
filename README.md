@@ -69,7 +69,7 @@ Ensuite, selon les besoins et les contributions : AWS, Supabase, Railway, Netlif
 
 - **Front** : Vue / Nuxt, avec Vue Flow pour le graphe
 - **Back** : Node.js / TypeScript, avec un planificateur pour lancer les vérifications
-- **Base de données** : SQLite par défaut, PostgreSQL en option
+- **Base de données et authentification** : Supabase (PostgreSQL + Supabase Auth), en local via la CLI Supabase
 - **Déploiement** : Docker / Docker Compose
 
 ## Identité visuelle
@@ -144,42 +144,66 @@ Le projet n'en est qu'au début : les idées, retours et propositions d'intégra
 
 - Node 26 (version fixée dans `.nvmrc` : `nvm use`)
 - npm 11 (fourni avec Node 26)
+- Docker (ou OrbStack) et la [CLI Supabase](https://supabase.com/docs/guides/cli) : la base PostgreSQL et l'authentification tournent en local via `supabase start`
 
 ### Installation et lancement
 
 ```bash
 npm install
-npm run dev        # app web (3000) : landing + dashboard + API (3001)
+npm run db:start   # démarre Supabase en local (Docker), la première fois télécharge les images
+npm run db:env     # écrit apps/api/.env et apps/web/.env à partir de la pile locale
+npm run dev        # app web (3000) : landing + dashboard, et API (3001)
 ```
 
-L'application web (`apps/web`, port 3000) regroupe la landing (`/`), la page de connexion (`/connexion`) et le dashboard protégé (`/dashboard`). Elle relaie les appels `/api/*` vers l'API (port 3001) : le navigateur ne parle qu'à `http://localhost:3000`, et le cookie de session reste sur la même origine.
+- Studio (base de données, utilisateurs) : http://127.0.0.1:54323
+- Mailpit (e-mails envoyés par Supabase Auth) : http://127.0.0.1:54324
+- `npm run db:stop` arrête la pile, `npm run db:reset` recrée la base locale et rejoue les migrations de `supabase/migrations/`.
 
-Copiez `apps/web/.env.example` en `apps/web/.env` pour changer l'URL de l'API utilisée par ce relais (`NUXT_API_BASE`).
+L'application web (`apps/web`, port 3000) regroupe la landing (`/`), la page de connexion (`/connexion`) et le dashboard protégé (`/dashboard`). L'inscription et la connexion passent par les routes serveur `/auth/*` de l'application web (`login`, `signup`, `logout`, `session`), qui appellent Supabase Auth ; la session vit dans des cookies `HttpOnly` que le navigateur ne peut pas lire, et il ne parle jamais à Supabase. Le navigateur ne parle qu'à `http://localhost:3000` pour l'API : l'application relaie les appels `/api/*` vers l'API (port 3001) en y ajoutant le jeton d'accès Supabase (`Authorization: Bearer`), que l'API vérifie localement grâce aux clés publiques (JWKS) de Supabase. Les cookies de session ne sont jamais transmis à l'API.
+
+Les fichiers `.env` (ignorés par Git) sont générés par `npm run db:env` ; voir `apps/api/.env.example` et `apps/web/.env.example` pour la liste des variables (`SUPABASE_URL`, `SUPABASE_KEY` côté web, lues par le serveur uniquement et, en production, `NUXT_SUPABASE_URL` / `NUXT_SUPABASE_KEY` ; `DATABASE_URL`, `SUPABASE_URL` côté API). La clé `SUPABASE_KEY` est la clé publiable (publique par conception).
 
 ### Sécurité / déploiement
 
 - Switchyard est mono-tenant par conception : chaque route de données doit filtrer par `request.user.id`.
-- Les inscriptions sont ouvertes par défaut. Une fois vos comptes créés, fermez-les avec `ALLOW_REGISTRATION=false` (l'API affiche un avertissement au démarrage en production si elles restent ouvertes).
-- En production, définissez `ALLOWED_ORIGINS` (origine publique de l'application web) et `COOKIE_SECURE=true` (activé par défaut avec `NODE_ENV=production`, HTTPS requis).
-- Derrière un reverse proxy de confiance placé devant l'app web, activez `NUXT_TRUST_FRONT_PROXY=true` ; si l'API tourne dans un conteneur séparé, ajoutez l'hôte Nitro à `TRUST_PROXY` côté API.
+- Les tables applicatives vivent dans le schéma privé `switchyard`, non exposé par l'API de données de Supabase (PostgREST) : seule l'API Switchyard y accède. **Toute table créée un jour dans le schéma `public` doit activer la RLS** (`enable row level security`) et définir ses politiques dans la même migration.
+- La clé `service_role` / clé secrète de Supabase ne doit jamais se trouver dans l'application web, ni dans le navigateur. L'application web n'utilise que la clé publiable ; l'API n'a besoin d'aucune clé secrète pour vérifier les jetons.
+- `supabase/config.toml` ne s'applique qu'à la pile locale (CLI). Sur un projet Supabase hébergé, réglez dans le tableau de bord : confirmation des e-mails activée, `site_url` réel et liste de redirections minimale (sans joker), SMTP personnalisé, CAPTCHA et limites de débit (les inscriptions sont ouvertes), protection contre les mots de passe compromis si disponible, expiration du JWT d'environ 15 min (`jwt_expiry = 900`).
+- `SUPABASE_URL` doit être en `https` et `DATABASE_SSL=require` (par défaut en production ; `disable` n'est accepté qu'avec une base en loopback). L'API refuse de démarrer sinon.
+- Le cookie de session est `HttpOnly`, `SameSite=Lax` et `Secure` (hors `nuxt dev`) : une faille XSS ne peut pas voler le jeton de rafraîchissement. Le navigateur ne reçoit ni l'URL ni la clé Supabase. L'app web applique une CSP stricte avec nonce par requête (`nuxt-security`) : `default-src 'self'; script-src 'self' 'nonce-…' 'strict-dynamic'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'; upgrade-insecure-requests` (en développement, `connect-src` autorise aussi `ws:`/`wss:` pour le HMR et l'upgrade HTTPS est retiré), ainsi que `nosniff`, `X-Frame-Options`, `Referrer-Policy` et `Permissions-Policy`.
+- Toutes les requêtes vers Supabase Auth proviennent de l'IP du serveur Nitro : les limites de débit par IP du projet Supabase ne distinguent plus les visiteurs (relevez-les dans le tableau de bord). Les routes `/auth/login` et `/auth/signup` ont leur propre limiteur en mémoire, par processus (avec plusieurs instances, les compteurs ne sont pas partagés) : 10 tentatives par minute et par IP cliente, 5 échecs de connexion par couple e-mail + IP sur 15 minutes (un tiers ne peut donc pas verrouiller le compte de quelqu'un d'autre depuis son IP) et 50 échecs par e-mail sur 1 heure contre les attaques distribuées. Un e-mail non confirmé n'est pas compté comme un échec.
+- IP cliente et reverse proxy : `NUXT_TRUSTED_PROXY_HOPS` (entier ≥ 0, défaut 0) indique le nombre de reverse proxies de confiance devant Nitro. À 0, `X-Forwarded-For` est ignoré. À N, l'IP cliente est la N-ième entrée en partant de la DROITE (celle ajoutée par votre proxy le plus externe) : les entrées de gauche sont fournies par le client et ne sont jamais utilisées. Si l'en-tête a moins d'entrées que de sauts, l'IP du socket est utilisée. L'ancienne variable `NUXT_TRUST_FRONT_PROXY` n'existe plus. Si l'API tourne dans un conteneur séparé, ajoutez l'hôte Nitro à `TRUST_PROXY` côté API.
+- Origine publique : derrière un proxy qui termine le TLS sans transmettre l'hôte et le protocole d'origine, la vérification « même origine » (`Origin`) des routes `/auth/*` et `/api` échouerait. Définissez `NUXT_PUBLIC_ORIGIN` (ex. `https://switchyard.example.com`) : elle sert de référence à cette vérification et au lien de confirmation e-mail. Sinon l'URL de la requête est utilisée.
+- Taille des requêtes : les `POST` de `/auth/*` exigent un `Content-Length` (411 sinon) d'au plus 4 Ko (413) ; le proxy `/api` refuse les corps de plus de 1 Mo (413) ou sans longueur déclarée (`Transfer-Encoding: chunked`, 411). Limitez aussi la taille des corps sur votre reverse proxy.
+- Cache : toutes les pages HTML sont servies avec `Cache-Control: private, no-store` (le payload SSR peut contenir l'utilisateur) ; seuls les assets statiques (`/_nuxt/`, `/img/`, polices) restent cachables.
+- Durée de session : le `Max-Age` du cookie (8 h) est glissant, réarmé à chaque rafraîchissement : ce n'est pas une durée de vie absolue. Pour borner la session, activez côté Supabase le time-box (`[auth.sessions] timebox`) et l'inactivité (`inactivity_timeout`).
+- Rafraîchissement concurrent : plusieurs requêtes simultanées peuvent rafraîchir le même jeton. `refresh_token_reuse_interval` (10 s dans `supabase/config.toml`) doit rester > 0, sinon la perdante invaliderait la session. De plus, une requête dont le rafraîchissement échoue est traitée comme anonyme sans supprimer les cookies : seul `/auth/logout` les supprime.
+- Confirmation d'e-mail : gardez-la TOUJOURS activée en production. Sans elle, l'inscription révèle l'existence d'un compte (« Un compte existe déjà ») et connecte immédiatement. Le lien de confirmation arrive sur `/auth/callback` (échange du code puis redirection) : ajoutez `<origine>/auth/callback` aux URL de redirection autorisées (déjà fait en local dans `supabase/config.toml`).
+- Avant la première table métier : créez un rôle de base de données dédié à l'API, à moindres privilèges, avec accès uniquement au schéma `switchyard`, activez la RLS avec une politique sur `user_id`, et filtrez chaque requête par `request.user.id`.
+- Gardez le port de l'API (y compris `/health`) interne : seul l'app web doit pouvoir l'atteindre.
+- Définissez `ALLOWED_ORIGINS` sur l'origine publique de l'application web, ainsi que `SUPABASE_URL` et `DATABASE_URL` vers votre projet. L'API affiche des avertissements au démarrage en production si la configuration reste celle du développement.
 
 ### Workspaces
 
 | Workspace             | Rôle                                                                | Port |
 | --------------------- | ------------------------------------------------------------------- | ---- |
 | `apps/web`            | Landing, connexion et dashboard (Nuxt + Vue Flow)                   | 3000 |
-| `apps/api`            | API (Fastify) : `/health`, `/api/auth/*`, `/api/integrations`       | 3001 |
+| `apps/api`            | API (Fastify) : `/health`, `/api/me`, `/api/integrations`           | 3001 |
 | `packages/plugin-sdk` | Interface commune des intégrations (vérifications en lecture seule) | -    |
 
 ### Scripts principaux
 
-| Commande               | Effet                                         |
-| ---------------------- | --------------------------------------------- |
-| `npm run dev`          | Lance l'API et l'application web              |
-| `npm run lint`         | ESLint sur tout le dépôt                      |
-| `npm run format:check` | Vérifie le formatage Prettier                 |
-| `npm run typecheck`    | Vérification des types de tous les workspaces |
-| `npm test`             | Tests Vitest                                  |
-| `npm run build`        | Build de tous les workspaces                  |
+| Commande               | Effet                                          |
+| ---------------------- | ---------------------------------------------- |
+| `npm run dev`          | Lance l'API et l'application web               |
+| `npm run db:start`     | Démarre Supabase en local (Docker)             |
+| `npm run db:stop`      | Arrête Supabase                                |
+| `npm run db:reset`     | Recrée la base locale et rejoue les migrations |
+| `npm run db:env`       | Génère les `.env` depuis la pile Supabase      |
+| `npm run lint`         | ESLint sur tout le dépôt                       |
+| `npm run format:check` | Vérifie le formatage Prettier                  |
+| `npm run typecheck`    | Vérification des types de tous les workspaces  |
+| `npm test`             | Tests Vitest                                   |
+| `npm run build`        | Build de tous les workspaces                   |
 
 Pour contribuer, voir [CONTRIBUTING.md](./CONTRIBUTING.md).
