@@ -1,0 +1,25 @@
+{
+  "name": "@switchyard/plugin-sdk",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Common interface for Switchyard integrations (read-only checks).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  }
+}
