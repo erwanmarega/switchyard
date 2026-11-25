@@ -1,26 +1,20 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { definePageMeta, useFetch, useHead } from '#imports'
 import { useAuth } from '~/composables/useAuth'
 import { validatePath } from '@switchyard/plugin-sdk'
-import { VueFlow } from '@vue-flow/core'
-import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
-import { demoPath, demoStatuses } from '~/utils/demo-path'
-import { STATUS_COLORS, STATUS_LABELS, toFlowElements } from '~/utils/to-flow'
-import type { CheckStatus } from '@switchyard/plugin-sdk'
+import { demoDiagnostics, demoPath, demoProject, demoStatuses } from '~/utils/demo-path'
+import type { IntegrationSummary } from '~/components/dashboard/IntegrationsGrid.vue'
 
 useHead({ title: 'Tableau de bord — Switchyard' })
 definePageMeta({ middleware: 'auth' })
 
+const project = demoProject
 const pathErrors = validatePath(demoPath)
-const { nodes, edges } = toFlowElements(demoPath, demoStatuses)
-const legend = Object.keys(STATUS_COLORS) as CheckStatus[]
 
-interface IntegrationSummary {
-  id: string
-  name: string
-  checks: string[]
-}
+// Selected station: the probable cause of the incident, if any, is open by default.
+const selectedId = ref<string | null>(project.incident?.causeNodeId ?? null)
+const selectedNode = computed(() => demoPath.nodes.find((n) => n.id === selectedId.value) ?? null)
 
 // Same-origin request through the /api proxy: the session cookie is forwarded.
 // An expired session (401) clears the cached user and sends the visitor back to /connexion.
@@ -32,59 +26,87 @@ const { data, error, status } = await useFetch<{ integrations: IntegrationSummar
 </script>
 
 <template>
-  <div>
-    <DashboardBar />
-    <main class="page">
-      <h1>Chemin du projet</h1>
-      <p class="lead">
-        Le parcours d'une requête et d'un paiement, de votre domaine à vos données.
-      </p>
-
-      <section class="card">
-        <h2>Graphe</h2>
-        <p v-if="pathErrors.length" class="error-box">
-          Chemin invalide : {{ pathErrors.join(' ; ') }}
-        </p>
-        <template v-else>
-          <ul class="legend">
-            <li v-for="s in legend" :key="s">
-              <span class="dot" :style="{ background: STATUS_COLORS[s] }" />{{ STATUS_LABELS[s] }}
-            </li>
-          </ul>
-          <ClientOnly>
-            <div class="flow-wrapper">
-              <VueFlow
-                :nodes="nodes"
-                :edges="edges"
-                :nodes-draggable="false"
-                :nodes-connectable="false"
-                fit-view-on-init
-              >
-                <Background />
-                <Controls :show-interactive="false" />
-              </VueFlow>
-            </div>
-            <template #fallback>
-              <div class="flow-wrapper" />
-            </template>
-          </ClientOnly>
-        </template>
-      </section>
-
-      <section class="card">
-        <h2>Intégrations disponibles</h2>
-        <p v-if="status === 'pending'">Chargement…</p>
-        <p v-else-if="error" class="error-box">
-          Impossible de récupérer les intégrations. Vérifiez que l'API est démarrée et que votre
-          session est active.
-        </p>
-        <ul v-else-if="data?.integrations.length">
-          <li v-for="i in data.integrations" :key="i.id">
-            <strong>{{ i.name }}</strong> — {{ i.checks.length }} vérification(s)
-          </li>
-        </ul>
-        <p v-else>Aucune intégration enregistrée.</p>
+  <div class="page">
+    <DashboardBar :project="project.name" />
+    <main>
+      <DashboardProjectHead
+        :project="project"
+        :statuses="demoStatuses"
+        :diagnostics="demoDiagnostics"
+        :path="demoPath"
+      />
+      <DashboardIncidentBanner v-if="project.incident" :incident="project.incident" />
+      <DashboardEmptyState v-if="demoPath.nodes.length === 0" />
+      <div v-else class="columns">
+        <div class="main">
+          <DashboardPathGraph
+            :path="demoPath"
+            :statuses="demoStatuses"
+            :diagnostics="demoDiagnostics"
+            :errors="pathErrors"
+            :incident="project.incident"
+            :selected-id="selectedId"
+            @select="selectedId = $event"
+          />
+        </div>
+        <div class="side">
+          <DashboardStationPanel
+            v-if="selectedNode"
+            :node="selectedNode"
+            :status="demoStatuses[selectedNode.id] ?? 'unknown'"
+            :diagnostic="demoDiagnostics[selectedNode.id]"
+            :incident="project.incident"
+            @close="selectedId = null"
+          />
+          <DashboardOverviewPanel v-else :project="project" :path="demoPath" />
+        </div>
+      </div>
+      <section id="integrations" class="integrations">
+        <DashboardIntegrationsGrid
+          :integrations="data?.integrations"
+          :loading="status === 'pending'"
+          :failed="!!error"
+        />
       </section>
     </main>
   </div>
 </template>
+
+<style scoped>
+.page {
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--dash-ink);
+}
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--dash-line);
+}
+.main {
+  flex: 999 1 640px;
+  min-width: 0;
+  padding: 24px 32px;
+  background: var(--paper);
+}
+.side {
+  flex: 1 1 360px;
+  max-width: 100%;
+  padding: 24px;
+  background: var(--dash-panel);
+  border-left: 1px solid var(--dash-line);
+}
+.integrations {
+  border-top: 1px solid var(--dash-line);
+  background: var(--paper);
+}
+@media (max-width: 820px) {
+  .main {
+    padding: 20px;
+  }
+  .side {
+    border-left: 0;
+    border-top: 1px solid var(--dash-line);
+  }
+}
+</style>

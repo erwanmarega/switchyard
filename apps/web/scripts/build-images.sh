@@ -30,3 +30,4 @@ run card-5 yardtower.jpg $CARD --zoom 3.0 --focus 0.33,0.4 --local 1.2 --contras
 run card-6 signals.jpg $CARD --zoom 2.2 --focus 0.25,0.7 --local 1.0 --contrast 1.2
 run cta-yard yardengine.jpg --width 2400 --height 900 $BAND --sky 0.45 --gamma 1.1 --quality 30 --cell 6 --zoom 1.05 --focus 0.5,0.72 --local 1.2 --contrast 1.3
 run solution-bg consolidation.jpg --width 1800 --height 1000 $BAND --sky 0.5 --gamma 1.2 --quality 30 --cell 6 --zoom 1.3 --focus 0.5,0.9 --local 1.0 --contrast 1.2 --fade-left 0.5
+run dash-band mikado.jpg --width 2400 --height 520 --invert --focus 0.5,0.62 --place-right 0.6 --fade-left 0.8 --gamma 0.6 --sky 0.2 --local 1.5 --contrast 1.3 --cell 5 --quality 60

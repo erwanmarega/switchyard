@@ -2,6 +2,8 @@
 import { navigateTo, ref } from '#imports'
 import { useAuth } from '~/composables/useAuth'
 
+defineProps<{ project?: string }>()
+
 const { user, logout } = useAuth()
 const pending = ref(false)
 
@@ -18,26 +20,32 @@ async function onLogout() {
 
 <template>
   <header class="bar">
-    <NuxtLink to="/" class="brand" aria-label="Switchyard, accueil">
-      <svg
-        width="28"
-        height="16"
-        viewBox="0 0 28 16"
-        aria-hidden="true"
-        shape-rendering="crispEdges"
-      >
-        <rect x="0" y="4" width="28" height="2" fill="currentColor" />
-        <rect x="0" y="10" width="28" height="2" fill="currentColor" />
-        <rect x="4" y="2" width="2" height="12" fill="currentColor" />
-        <rect x="12" y="2" width="2" height="12" fill="currentColor" />
-        <rect x="20" y="2" width="2" height="12" fill="currentColor" />
-        <rect x="22" y="5" width="6" height="6" fill="var(--signal)" />
-      </svg>
-      <span>Switchyard</span>
-    </NuxtLink>
+    <div class="trail">
+      <NuxtLink to="/" class="brand" aria-label="Switchyard, accueil">
+        <svg
+          width="30"
+          height="16"
+          viewBox="0 0 30 16"
+          aria-hidden="true"
+          shape-rendering="crispEdges"
+        >
+          <rect x="0" y="4" width="30" height="2" fill="currentColor" />
+          <rect x="0" y="10" width="30" height="2" fill="currentColor" />
+          <rect x="4" y="1" width="2" height="14" fill="currentColor" />
+          <rect x="12" y="1" width="2" height="14" fill="currentColor" />
+          <rect x="20" y="1" width="2" height="14" fill="currentColor" />
+          <rect x="25" y="5" width="5" height="6" fill="currentColor" />
+        </svg>
+        <span class="name">Switchyard</span>
+      </NuxtLink>
+      <template v-if="project">
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="project">{{ project }}</span>
+      </template>
+    </div>
     <div class="account">
       <span v-if="user" class="email">{{ user.email }}</span>
-      <button class="btn btn-light" type="button" :disabled="pending" @click="onLogout">
+      <button class="logout" type="button" :disabled="pending" @click="onLogout">
         <PixelIcon name="logout" />{{ pending ? 'Déconnexion…' : 'Se déconnecter' }}
       </button>
     </div>
@@ -47,22 +55,44 @@ async function onLogout() {
 <style scoped>
 .bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  flex-wrap: wrap;
-  padding: 14px 32px;
-  background: var(--prussian);
-  color: var(--paper);
+  min-height: 64px;
+  padding: 0 32px;
+  background: var(--paper);
+  color: var(--dash-ink);
+  border-bottom: 1px solid var(--dash-line);
+}
+.trail {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
+  min-height: 44px;
   text-decoration: none;
-  font-family: var(--font-pixel);
-  font-size: 22px;
-  color: var(--paper);
+  color: var(--prussian);
+}
+.name {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+}
+.sep {
+  color: var(--dash-faint);
+}
+.project {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .account {
   display: flex;
@@ -73,17 +103,39 @@ async function onLogout() {
 .email {
   font-family: var(--font-mono);
   font-size: 13px;
+  color: var(--dash-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.btn:disabled {
+.logout {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--prussian);
+  border-radius: 0;
+  background: transparent;
+  color: var(--prussian);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.logout:hover {
+  background: var(--dash-panel);
+}
+.logout:focus-visible {
+  outline-color: var(--prussian);
+}
+.logout:disabled {
   opacity: 0.6;
   cursor: progress;
 }
 @media (max-width: 820px) {
   .bar {
-    padding: 12px 20px;
+    padding: 8px 20px;
   }
 }
 </style>

@@ -1,44 +1,27 @@
-import { Position } from '@vue-flow/core'
 import type { CheckStatus, ProjectPath } from '@switchyard/plugin-sdk'
 
-export interface FlowNode {
-  id: string
-  label: string
-  position: { x: number; y: number }
-  // Left-to-right path: edges leave on the right and enter on the left.
-  sourcePosition: Position.Right
-  targetPosition: Position.Left
-  class: string
-  data: { integrationId: string; status: CheckStatus; color: string }
+/** The same colors as CSS variables (defined in tokens.css), for scoped styles. */
+export const STATUS_VARS: Record<CheckStatus, string> = {
+  ok: 'var(--status-ok)',
+  warning: 'var(--status-warn)',
+  error: 'var(--status-bad)',
+  unknown: 'var(--status-unknown)',
 }
 
-export interface FlowEdge {
-  id: string
-  source: string
-  target: string
-  label?: string
-  animated: boolean
-  style: { stroke: string }
-}
-
-export const STATUS_COLORS: Record<CheckStatus, string> = {
-  ok: '#2e8b57',
-  warning: '#e08a1e',
-  error: '#c8372d',
-  unknown: '#8a8f9c',
+/** Readable status text colours (darker than the marker colours, for text on white). */
+export const STATUS_TEXT_VARS: Record<CheckStatus, string> = {
+  ok: 'var(--status-ok-text)',
+  warning: 'var(--status-warn-text)',
+  error: 'var(--status-bad-text)',
+  unknown: 'var(--dash-muted)',
 }
 
 export const STATUS_LABELS: Record<CheckStatus, string> = {
-  ok: 'Opérationnel',
+  ok: 'OK',
   warning: 'Attention',
-  error: 'En erreur',
+  error: 'Bloqué',
   unknown: 'Inconnu',
 }
-
-export const statusClass = (status: CheckStatus): string => `sy-status-${status}`
-
-const X_GAP = 260
-const Y_GAP = 130
 
 /** Assigns each node a column: the length of the longest path leading to it. */
 function computeLayers(path: ProjectPath): Map<string, number> {
@@ -58,38 +41,79 @@ function computeLayers(path: ProjectPath): Map<string, number> {
   return layers
 }
 
-/** Pure conversion of a ProjectPath and its statuses into Vue Flow nodes and edges. */
-export function toFlowElements(
-  path: ProjectPath,
-  statuses: Partial<Record<string, CheckStatus>> = {},
-): { nodes: FlowNode[]; edges: FlowEdge[] } {
-  const layers = computeLayers(path)
-  const rowsUsed = new Map<number, number>()
-
-  const nodes = path.nodes.map((node): FlowNode => {
-    const layer = layers.get(node.id) ?? 0
-    const row = rowsUsed.get(layer) ?? 0
-    rowsUsed.set(layer, row + 1)
-    const status = statuses[node.id] ?? 'unknown'
-    return {
-      id: node.id,
-      label: node.label,
-      position: { x: layer * X_GAP, y: row * Y_GAP },
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-      class: `sy-node ${statusClass(status)}`,
-      data: { integrationId: node.integrationId, status, color: STATUS_COLORS[status] },
+/** Longest path length from each node down to a sink (bounded, so cycles terminate). */
+function computeDepths(path: ProjectPath): Map<string, number> {
+  const depths = new Map<string, number>(path.nodes.map((n) => [n.id, 0]))
+  for (let i = 0; i < path.nodes.length; i++) {
+    let changed = false
+    for (const edge of path.edges) {
+      const next = (depths.get(edge.to) ?? 0) + 1
+      if (
+        depths.has(edge.from) &&
+        next > (depths.get(edge.from) ?? 0) &&
+        next < path.nodes.length
+      ) {
+        depths.set(edge.from, next)
+        changed = true
+      }
     }
-  })
+    if (!changed) break
+  }
+  return depths
+}
 
-  const edges = path.edges.map((edge): FlowEdge => ({
-    id: edge.id,
-    source: edge.from,
-    target: edge.to,
-    label: edge.label,
-    animated: statuses[edge.from] === 'error' || statuses[edge.to] === 'error',
-    style: { stroke: STATUS_COLORS[statuses[edge.from] ?? 'unknown'] },
-  }))
+/**
+ * Feeder nodes join the main line from below instead of sitting in column 0. A feeder is a root
+ * (no incoming edge) with exactly one outgoing edge whose target is beyond column 0, and which
+ * is not the main root. The main root is the root with the longest downstream path (the first in
+ * path order on ties), so the line's own starting point is never a feeder.
+ */
+function findFeeders(path: ProjectPath, layers: Map<string, number>): Set<string> {
+  const depths = computeDepths(path)
+  const roots = path.nodes.filter((n) => !path.edges.some((e) => e.to === n.id))
+  const mainRoot = roots.reduce<string | undefined>(
+    (best, n) =>
+      best === undefined || (depths.get(n.id) ?? 0) > (depths.get(best) ?? 0) ? n.id : best,
+    undefined,
+  )
+  const feeders = new Set<string>()
+  for (const root of roots) {
+    if (root.id === mainRoot) continue
+    const outgoing = path.edges.filter((e) => e.from === root.id)
+    const target = outgoing.length === 1 ? outgoing[0]!.to : undefined
+    if (target !== undefined && (layers.get(target) ?? 0) > 0) feeders.add(root.id)
+  }
+  return feeders
+}
 
-  return { nodes, edges }
+/** Grid cell of a node on the path plan: its column and its row within that column. */
+export interface GridCell {
+  col: number
+  row: number
+}
+
+/**
+ * Pure placement of a path on a grid. A node's column is the length of the longest path leading
+ * to it; the main line takes row 0, and each feeder joins its target's column on the next free
+ * row. The line plan turns these cells into world coordinates.
+ */
+export function pathGrid(path: ProjectPath): Map<string, GridCell> {
+  const layers = computeLayers(path)
+  const feeders = findFeeders(path, layers)
+  const feederTarget = new Map<string, string>()
+  for (const edge of path.edges) if (feeders.has(edge.from)) feederTarget.set(edge.from, edge.to)
+  const rowsUsed = new Map<number, number>()
+  const grid = new Map<string, GridCell>()
+
+  const place = (id: string, col: number) => {
+    const row = rowsUsed.get(col) ?? 0
+    rowsUsed.set(col, row + 1)
+    grid.set(id, { col, row })
+  }
+  // Main line first so feeders take the next free row of their target's column.
+  for (const node of path.nodes) if (!feeders.has(node.id)) place(node.id, layers.get(node.id) ?? 0)
+  for (const node of path.nodes) {
+    if (feeders.has(node.id)) place(node.id, layers.get(feederTarget.get(node.id) ?? '') ?? 0)
+  }
+  return grid
 }

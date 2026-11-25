@@ -8,9 +8,20 @@
   --line-light: rgba(244, 241, 232, 0.28);
 
   /* Status colors: product mockups only, never branding */
-  --status-ok: #2e8b57;
-  --status-warn: #e0a100;
+  --status-ok: #2f7d4a;
+  --status-warn: #d9822b;
   --status-bad: #c0392b;
+  --status-unknown: #8a90a6;
+  --status-ok-text: #256b3d;
+  --status-warn-text: #8f4c00;
+  --status-bad-text: #a52a1e;
+
+  /* Dashboard (paper editorial) */
+  --dash-ink: #14213d;
+  --dash-muted: #4a5170;
+  --dash-faint: #8a90a6;
+  --dash-line: #d9d3c3;
+  --dash-panel: #ebe6d8;
 
   --font-pixel: 'Geist Pixel', 'Courier New', monospace;
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
