@@ -122,6 +122,8 @@ describe('loadConfig', () => {
       SWITCHYARD_ENCRYPTION_KEY: Buffer.from(TEST_ENV.SWITCHYARD_ENCRYPTION_KEY, 'base64'),
       ALLOWED_ORIGINS: ['http://localhost:3000', 'http://127.0.0.1:3000'],
       TRUST_PROXY: ['127.0.0.1', '::1'],
+      CHECKS_ENABLED: true,
+      CHECK_INTERVAL_SECONDS: 300,
     })
   })
 

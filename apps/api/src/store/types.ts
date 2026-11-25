@@ -1,3 +1,7 @@
+import type { CheckStatus } from '@switchyard/plugin-sdk'
+
+export type { CheckStatus }
+
 /** Records returned by the store: camelCase, timestamps as ISO strings. Never contain secrets. */
 export interface ProjectRecord {
   id: string
@@ -80,6 +84,56 @@ export class ValidationError extends Error {
   }
 }
 
+/** Connection data loaded by the check runner. Holds the sealed secrets: never send it anywhere. */
+export interface RunnableConnection {
+  id: string
+  projectId: string
+  integrationId: string
+  config: Record<string, string>
+  /** Sealed ciphertext, or null when the integration has no secret field. */
+  secrets: string | null
+}
+
+/** A sanitized check result, ready to store (secrets already redacted by the runner). */
+export interface NewCheckResult {
+  checkId: string
+  status: CheckStatus
+  message: string
+  details: Record<string, unknown> | null
+  /** ISO 8601. */
+  checkedAt: string
+}
+
+export interface CheckResultRecord extends NewCheckResult {
+  connectionId: string
+}
+
+/** A connection claimed by the scheduler: ids only, never secrets. */
+export interface DueConnection {
+  userId: string
+  projectId: string
+  connectionId: string
+}
+
+/**
+ * SYSTEM-level access used only by the check scheduler. It is the single place that crosses users,
+ * and it only ever returns ids (through SECURITY DEFINER functions in the database).
+ */
+export interface SchedulerStore {
+  /**
+   * Atomically claims up to `limit` connections whose next check is due (at most `perUser` per
+   * user, so one user cannot starve the others) and pushes their next check `intervalSeconds`
+   * later, so concurrent API instances never claim the same connection.
+   */
+  claimDueConnections(
+    limit: number,
+    intervalSeconds: number,
+    perUser: number,
+  ): Promise<DueConnection[]>
+  /** Deletes check results older than `olderThanDays`. Returns the number of deleted rows. */
+  pruneCheckResults(olderThanDays: number): Promise<number>
+}
+
 /**
  * User-scoped data access. Every method takes the authenticated user id first and only ever
  * touches that user's rows. "Not found" (missing or owned by someone else) is `null`/`false`.
@@ -119,6 +173,24 @@ export interface Store {
     projectId: string,
     connectionId: string,
   ): Promise<string | null>
+  /**
+   * INTERNAL (check runner only, never used by a route): what a run needs, including the sealed
+   * secrets. Null when the connection no longer exists.
+   */
+  getConnectionForRun(
+    userId: string,
+    projectId: string,
+    connectionId: string,
+  ): Promise<RunnableConnection | null>
+  /** Records the results of one run. False when the connection no longer exists. */
+  insertCheckResults(
+    userId: string,
+    projectId: string,
+    connectionId: string,
+    results: NewCheckResult[],
+  ): Promise<boolean>
+  /** Latest result per (connection, check) of the project. Null when the project does not exist. */
+  latestCheckResults(userId: string, projectId: string): Promise<CheckResultRecord[] | null>
 
   /** Null when the project does not exist. */
   getPath(userId: string, projectId: string): Promise<PathRecord | null>

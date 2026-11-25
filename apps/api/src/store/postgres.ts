@@ -3,11 +3,17 @@ import {
   LIMITS,
   LimitError,
   ValidationError,
+  type CheckResultRecord,
+  type CheckStatus,
   type ConnectionRecord,
+  type DueConnection,
+  type NewCheckResult,
   type PathEdgeRecord,
   type PathNodeRecord,
   type PathRecord,
   type ProjectRecord,
+  type RunnableConnection,
+  type SchedulerStore,
   type Store,
 } from './types.js'
 
@@ -46,6 +52,30 @@ const toConnection = (r: ConnectionRow): ConnectionRecord => ({
   createdAt: r.created_at.toISOString(),
   updatedAt: r.updated_at.toISOString(),
 })
+
+interface CheckResultRow {
+  connection_id: string
+  check_id: string
+  status: CheckStatus
+  message: string
+  details: Record<string, unknown> | null
+  checked_at: Date
+}
+
+const toCheckResult = (r: CheckResultRow): CheckResultRecord => ({
+  connectionId: r.connection_id,
+  checkId: r.check_id,
+  status: r.status,
+  message: r.message,
+  details: r.details,
+  checkedAt: r.checked_at.toISOString(),
+})
+
+function assertIntInRange(name: string, value: number, min: number, max: number) {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new RangeError(`${name} must be an integer between ${min} and ${max}`)
+  }
+}
 
 export function createPostgresStore(sql: Sql): Store {
   /**
@@ -180,7 +210,8 @@ export function createPostgresStore(sql: Sql): Store {
         if (patch.credentials) {
           await tx`
             update switchyard.connections
-            set config = ${tx.json(patch.credentials.config)}, secrets = ${patch.credentials.secrets}
+            set config = ${tx.json(patch.credentials.config)}, secrets = ${patch.credentials.secrets},
+              next_check_at = now()
             where id = ${connectionId} and project_id = ${projectId} and user_id = ${userId}`
         }
         const rows = await selectConnection(tx, userId, projectId, connectionId)
@@ -204,6 +235,71 @@ export function createPostgresStore(sql: Sql): Store {
           select secrets from switchyard.connections
           where id = ${connectionId} and project_id = ${projectId} and user_id = ${userId}`
         return rows[0]?.secrets ?? null
+      }),
+
+    getConnectionForRun: (userId, projectId, connectionId) =>
+      withUser(userId, async (tx) => {
+        const rows = await tx<
+          {
+            id: string
+            project_id: string
+            integration_id: string
+            config: Record<string, string>
+            secrets: string | null
+          }[]
+        >`
+          select id, project_id, integration_id, config, secrets
+          from switchyard.connections
+          where id = ${connectionId} and project_id = ${projectId} and user_id = ${userId}`
+        const r = rows[0]
+        if (!r) return null
+        return {
+          id: r.id,
+          projectId: r.project_id,
+          integrationId: r.integration_id,
+          config: r.config,
+          secrets: r.secrets,
+        } satisfies RunnableConnection
+      }),
+
+    insertCheckResults: async (userId, projectId, connectionId, results) => {
+      try {
+        return await withUser(userId, async (tx) => {
+          if ((await selectConnection(tx, userId, projectId, connectionId)).length === 0) {
+            return false
+          }
+          if (results.length > 0) {
+            const rows = results.map((r: NewCheckResult) => ({
+              user_id: userId,
+              project_id: projectId,
+              connection_id: connectionId,
+              check_id: r.checkId,
+              status: r.status,
+              message: r.message,
+              details: r.details === null ? null : tx.json(r.details as never),
+              checked_at: r.checkedAt,
+            }))
+            await tx`insert into switchyard.check_results ${tx(rows)}`
+          }
+          return true
+        })
+      } catch (err) {
+        // Connection deleted concurrently between the check and the insert.
+        if ((err as { code?: string }).code === '23503') return false
+        throw err
+      }
+    },
+
+    latestCheckResults: (userId, projectId) =>
+      withUser(userId, async (tx) => {
+        if (!(await projectExists(tx, userId, projectId))) return null
+        const rows = await tx<CheckResultRow[]>`
+          select distinct on (connection_id, check_id)
+            connection_id, check_id, status, message, details, checked_at
+          from switchyard.check_results
+          where project_id = ${projectId} and user_id = ${userId}
+          order by connection_id, check_id, checked_at desc, id desc`
+        return rows.map(toCheckResult)
       }),
 
     getPath: (userId, projectId) =>
@@ -288,5 +384,45 @@ export function createPostgresStore(sql: Sql): Store {
         }
         return true
       }),
+  }
+}
+
+/**
+ * System-level store for the check scheduler. It runs as `switchyard_scheduler` (no table
+ * privileges) WITHOUT a user id and only calls the SECURITY DEFINER functions, which return ids /
+ * a count and nothing else. Invalid arguments reject (never throw synchronously).
+ */
+export function createPostgresSchedulerStore(sql: Sql): SchedulerStore {
+  function asScheduler<T>(fn: (tx: TransactionSql) => Promise<T>): Promise<T> {
+    return sql.begin(async (tx) => {
+      await tx`set local role switchyard_scheduler`
+      return fn(tx)
+    }) as Promise<T>
+  }
+
+  return {
+    claimDueConnections: async (limit, intervalSeconds, perUser) => {
+      assertIntInRange('limit', limit, 1, 100)
+      assertIntInRange('intervalSeconds', intervalSeconds, 60, 86400)
+      assertIntInRange('perUser', perUser, 1, 100)
+      return asScheduler(async (tx) => {
+        const rows = await tx<{ user_id: string; project_id: string; connection_id: string }[]>`
+          select * from switchyard.claim_due_connections(${limit}, ${intervalSeconds}, ${perUser})`
+        return rows.map((r): DueConnection => ({
+          userId: r.user_id,
+          projectId: r.project_id,
+          connectionId: r.connection_id,
+        }))
+      })
+    },
+
+    pruneCheckResults: async (olderThanDays) => {
+      assertIntInRange('olderThanDays', olderThanDays, 1, 3650)
+      return asScheduler(async (tx) => {
+        const [row] = await tx<{ n: number }[]>`
+          select switchyard.prune_check_results(${olderThanDays}) as n`
+        return row!.n
+      })
+    },
   }
 }

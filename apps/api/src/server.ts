@@ -3,7 +3,7 @@ import { loadConfig } from './config.js'
 import { startupWarnings } from './startup.js'
 
 const config = loadConfig()
-const app = buildApp({ logger: true, config })
+const app = buildApp({ logger: true, config, startScheduler: true })
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'shutting down')
