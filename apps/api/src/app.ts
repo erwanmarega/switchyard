@@ -10,10 +10,12 @@ import { loadConfig, type Config } from './config.js'
 import { createSecretBox, type SecretBox } from './crypto/secrets.js'
 import { openDatabase, type Database, type PostgresDatabase } from './db/index.js'
 import { createDefaultRegistry, type IntegrationRegistry } from './integrations/registry.js'
+import { createCheckScheduler } from './checks/scheduler.js'
+import { checkRoutes } from './routes/checks.js'
 import { connectionRoutes } from './routes/connections.js'
 import { pathRoutes } from './routes/path.js'
 import { projectRoutes } from './routes/projects.js'
-import { createPostgresStore } from './store/postgres.js'
+import { createPostgresSchedulerStore, createPostgresStore } from './store/postgres.js'
 import type { Store } from './store/types.js'
 
 export const VERSION = '0.1.0'
@@ -30,6 +32,8 @@ export interface BuildAppOptions {
   secretBox?: SecretBox
   /** Defaults to local verification against the Supabase JWKS; tests inject their own keys. */
   verifyToken?: TokenVerifier
+  /** Starts the background check scheduler on ready. Defaults to false; tests never start it. */
+  startScheduler?: boolean
 }
 
 declare module 'fastify' {
@@ -64,9 +68,36 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const verifyToken =
     options.verifyToken ??
     createTokenVerifier(config.SUPABASE_URL, remoteKeySet(config.SUPABASE_URL))
+  if (options.startScheduler && options.db) {
+    throw new Error('buildApp: `startScheduler` requires the app to own its database')
+  }
   app.addHook('onClose', async () => {
     await db.close()
   })
+
+  if (options.startScheduler && config.CHECKS_ENABLED && ownedDb) {
+    const log = app.log.child({ component: 'check-scheduler' })
+    const call =
+      (level: 'debug' | 'info' | 'warn' | 'error') =>
+      (message: string, meta?: Record<string, unknown>) =>
+        log[level](meta ?? {}, message)
+    const scheduler = createCheckScheduler({
+      store,
+      scheduler: createPostgresSchedulerStore(ownedDb.sql),
+      registry,
+      box: secretBox,
+      logger: {
+        debug: call('debug'),
+        info: call('info'),
+        warn: call('warn'),
+        error: call('error'),
+      },
+      intervalSeconds: config.CHECK_INTERVAL_SECONDS,
+    })
+    app.addHook('onReady', async () => scheduler.start())
+    // preClose runs before the server and the onClose hooks, so the db is still open here.
+    app.addHook('preClose', async () => scheduler.stop())
+  }
 
   // Never leak real error details: 5xx get a generic message (the cause is logged), while
   // 4xx keep Fastify's standard response shape and messages.
@@ -139,6 +170,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.register(projectRoutes(store))
   app.register(connectionRoutes(store, registry, secretBox))
   app.register(pathRoutes(store))
+  app.register(checkRoutes(store))
 
   return app
 }

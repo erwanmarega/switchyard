@@ -62,6 +62,13 @@ const baseSchema = z.object({
   ALLOWED_ORIGINS: commaList(DEFAULT_ALLOWED_ORIGINS),
   // Comma-separated proxies (IPs/CIDRs) whose X-Forwarded-For is trusted (the web app's proxy).
   TRUST_PROXY: commaList('127.0.0.1,::1'),
+  // Background check scheduler (started by server.ts only).
+  CHECKS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  // Seconds between two runs of the same connection.
+  CHECK_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(86400).default(300),
 })
 
 const envSchema = baseSchema
