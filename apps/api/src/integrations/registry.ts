@@ -1,5 +1,6 @@
 import type { Integration } from '@switchyard/plugin-sdk'
 import { exampleIntegration } from './example.js'
+import { vercelIntegration } from './vercel.js'
 
 export class IntegrationRegistry {
   private readonly integrations = new Map<string, Readonly<Integration>>()
@@ -23,5 +24,6 @@ export class IntegrationRegistry {
 export function createDefaultRegistry(): IntegrationRegistry {
   const registry = new IntegrationRegistry()
   registry.register(exampleIntegration)
+  registry.register(vercelIntegration)
   return registry
 }
