@@ -25,11 +25,22 @@ export const otherIntegration = defineIntegration({
   checks: [],
 })
 
+export const patternIntegration = defineIntegration({
+  id: 'pattern',
+  name: 'Pattern',
+  credentialsSchema: [
+    { key: 'token', label: 'Token', secret: true },
+    { key: 'slug', label: 'Slug', secret: false, optional: true, pattern: '[a-z0-9-]+' },
+  ],
+  checks: [],
+})
+
 export function routesApp(signer: Signer) {
   const config = testConfig()
   const registry = createDefaultRegistry()
   registry.register(fakeIntegration)
   registry.register(otherIntegration)
+  registry.register(patternIntegration)
   const store: MemoryStore = createMemoryStore()
   const box: SecretBox = createSecretBox(config.SWITCHYARD_ENCRYPTION_KEY)
   const verifyToken = createTokenVerifier(

@@ -115,6 +115,63 @@ describe('connections: create', () => {
     expect(res.body).not.toContain(SECRET)
   })
 
+  it('accepts an omitted optional field and stores nothing for it', async () => {
+    const res = await connect(
+      await newProject(),
+      validBody({ integrationId: 'pattern', credentials: { token: SECRET } }),
+    )
+    expect(res.statusCode).toBe(201)
+    expect(res.json().connection.config).toEqual({})
+    expect(res.json().connection.secretFields).toEqual(['token'])
+  })
+
+  it('accepts a value matching the pattern', async () => {
+    const res = await connect(
+      await newProject(),
+      validBody({ integrationId: 'pattern', credentials: { token: SECRET, slug: 'my-app-1' } }),
+    )
+    expect(res.statusCode).toBe(201)
+    expect(res.json().connection.config).toEqual({ slug: 'my-app-1' })
+  })
+
+  it.each(['My App', 'a/b', 'ok\nbad', '../x'])(
+    'rejects the value %j not matching the pattern without echoing it',
+    async (slug) => {
+      const res = await connect(
+        await newProject(),
+        validBody({ integrationId: 'pattern', credentials: { token: SECRET, slug } }),
+      )
+      expect(res.statusCode).toBe(400)
+      expect(res.body).toContain('credentials.slug')
+      expect(res.body).toContain('Format invalide.')
+      expect(res.body).not.toContain(SECRET)
+      expect(res.body).not.toContain('My App')
+    },
+  )
+
+  it.each([
+    ['token', `${SECRET}\r\nX-Evil: 1`],
+    ['token', `${SECRET}\n`],
+    ['teamId', 'team\u0000id'],
+    ['teamId', 'team\u007fid'],
+  ])('rejects control characters in %s without echoing the value', async (key, value) => {
+    const credentials = { token: SECRET, teamId: 'team_1', [key]: value }
+    const res = await connect(await newProject(), validBody({ credentials }))
+    expect(res.statusCode).toBe(400)
+    expect(res.body).toContain(`credentials.${key}`)
+    expect(res.body).toContain('Format invalide.')
+    expect(res.body).not.toContain(SECRET)
+  })
+
+  it('still requires a required field when optional ones are present', async () => {
+    const res = await connect(
+      await newProject(),
+      validBody({ integrationId: 'pattern', credentials: { slug: 'ok' } }),
+    )
+    expect(res.statusCode).toBe(400)
+    expect(res.body).toContain('credentials.token')
+  })
+
   it('rejects an extra credential key without echoing values', async () => {
     const res = await connect(
       await newProject(),
@@ -344,8 +401,20 @@ describe('GET /api/integrations', () => {
     expect(res.statusCode).toBe(200)
     const fake = res.json().integrations.find((i: { id: string }) => i.id === 'fake')
     expect(fake.credentialsSchema).toEqual([
-      { key: 'token', label: 'Token', secret: true },
-      { key: 'teamId', label: 'Team', secret: false },
+      { key: 'token', label: 'Token', secret: true, optional: false, pattern: null },
+      { key: 'teamId', label: 'Team', secret: false, optional: false, pattern: null },
     ])
+  })
+
+  it('exposes optional and pattern', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/integrations', headers: a })
+    const p = res.json().integrations.find((i: { id: string }) => i.id === 'pattern')
+    expect(p.credentialsSchema[1]).toEqual({
+      key: 'slug',
+      label: 'Slug',
+      secret: false,
+      optional: true,
+      pattern: '[a-z0-9-]+',
+    })
   })
 })

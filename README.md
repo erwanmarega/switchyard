@@ -120,7 +120,7 @@ Le bleu a aussi un rôle fonctionnel : neutre, il ne se confond pas avec les **c
 
 - [x] Cœur de l'application : système de plugins, stockage chiffré des tokens
 - [ ] Affichage du graphe du projet
-- [ ] Intégration Vercel
+- [x] Intégration Vercel
 - [ ] Intégration Stripe
 - [ ] Intégration Cloudflare
 - [ ] Alertes (webhook Discord/Slack, email)
@@ -184,6 +184,27 @@ Les fichiers `.env` (ignorés par Git) sont générés par `npm run db:env` ; vo
 - Vérifications périodiques : l'API (processus lancé par `server.ts`) vérifie chaque connexion toutes les `CHECK_INTERVAL_SECONDS` (300 s par défaut, `CHECKS_ENABLED=false` pour désactiver). Le planificateur est le seul code qui traverse les utilisateurs : il passe par le rôle dédié `switchyard_scheduler` (`NOLOGIN`, aucun droit sur les tables), seul autorisé à exécuter les fonctions `SECURITY DEFINER` `claim_due_connections` (ne renvoie que des identifiants, au plus 5 connexions par utilisateur à chaque passage, sans double réclamation entre instances) et `prune_check_results` (rétention de 30 jours). Leur propriétaire doit contourner la RLS (`BYPASSRLS`, le cas du rôle `postgres` de Supabase) ; sinon elles échouent explicitement. Le déchiffrement des secrets, la lecture et l'écriture des résultats se font ensuite par utilisateur, sous RLS. Les secrets (y compris encodés en URL, JSON ou base64) sont masqués dans les résultats et les journaux ; `ctx.fetch` n'accepte que le `https` et refuse les redirections par défaut ; chaque vérification est limitée à 15 s. Les intégrations s'exécutent dans le processus de l'API avec les identifiants déchiffrés : seules des intégrations relues peuvent être ajoutées (voir `packages/plugin-sdk/README.md`).
 - Gardez le port de l'API (y compris `/health`) interne : seul l'app web doit pouvoir l'atteindre.
 - Définissez `ALLOWED_ORIGINS` sur l'origine publique de l'application web, ainsi que `SUPABASE_URL` et `DATABASE_URL` vers votre projet. L'API affiche des avertissements au démarrage en production si la configuration reste celle du développement.
+
+### Intégration Vercel
+
+Une connexion Vercel demande :
+
+- **Token d'accès** (secret, chiffré au repos) : créez-le dans _Account Settings → Tokens_.
+- **Projet** : l'id (`prj_…`) ou le nom du projet.
+- **Équipe** (facultatif) : l'id de l'équipe, nécessaire seulement si le token n'est pas déjà limité à cette équipe.
+
+Vérifications, toutes les `CHECK_INTERVAL_SECONDS` :
+
+| Vérification                             | Résultat                                                                                                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dernier déploiement de production        | `ok` s'il est en ligne ou en cours depuis moins de 30 min ; `error` s'il a échoué ; `warning` s'il est annulé, bloqué depuis plus de 30 min ou absent                              |
+| Variables preview absentes en production | `warning` avec la liste des **noms** des variables définies en preview (hors variables propres à une branche) mais pas en production ; les valeurs ne sont jamais lues ni stockées |
+
+**Vercel ne propose pas de token en lecture seule** : un token peut aussi déployer, supprimer des projets ou lire les valeurs des variables. Switchyard n'appelle que deux routes en `GET` sur `api.vercel.com` (imposé par le runner), mais limitez quand même le risque :
+
+- créez un token limité à **une seule équipe** (ou à un seul projet si votre offre le permet), jamais un token « Full Account » ;
+- choisissez une **date d'expiration** et renouvelez-le ;
+- gardez à l'esprit que les noms des variables manquantes (par exemple `STRIPE_SECRET_KEY`) sont visibles dans le résultat par toute personne ayant accès au projet Switchyard.
 
 ### Workspaces
 

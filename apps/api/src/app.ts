@@ -163,6 +163,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
         key: f.key,
         label: f.label,
         secret: f.secret,
+        optional: f.optional ?? false,
+        pattern: f.pattern ?? null,
       })),
     })),
   }))

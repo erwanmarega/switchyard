@@ -1,4 +1,4 @@
-import type { Integration } from '@switchyard/plugin-sdk'
+import { credentialPattern, type Integration } from '@switchyard/plugin-sdk'
 import { openJson, sealJson, type SecretBox } from '../crypto/secrets.js'
 
 export interface CredentialIssue {
@@ -17,6 +17,9 @@ export class CredentialsError extends Error {
 export const connectionAad = (connectionId: string, userId: string) =>
   `connection:${connectionId}:user:${userId}`
 
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_CHARS_RE = /[\u0000-\u001F\u007F]/
+
 export interface SplitCredentials {
   config: Record<string, string>
   /** Sealed ciphertext; null when the integration has no secret field. */
@@ -24,8 +27,9 @@ export interface SplitCredentials {
 }
 
 /**
- * Checks that `credentials` has exactly the integration's fields, then keeps non-secret fields
- * in `config` and seals the secret ones bound to this connection and user.
+ * Checks that `credentials` only has the integration's fields (optional ones may be absent), that
+ * values match their `pattern`, that no value contains control characters, then keeps non-secret fields in `config` and seals the secret ones
+ * bound to this connection and user.
  */
 export function splitCredentials(
   box: SecretBox,
@@ -41,9 +45,16 @@ export function splitCredentials(
       issues.push({ path: `credentials.${key.slice(0, 64)}`, message: 'Champ non autorisé.' })
     }
   }
-  for (const key of expected) {
-    if (!Object.hasOwn(credentials, key)) {
-      issues.push({ path: `credentials.${key}`, message: 'Champ requis.' })
+  for (const field of integration.credentialsSchema) {
+    const path = `credentials.${field.key}`
+    if (!Object.hasOwn(credentials, field.key)) {
+      if (!field.optional) issues.push({ path, message: 'Champ requis.' })
+    } else {
+      const value = credentials[field.key]!
+      // Never echo the value: it may be a secret.
+      if (CONTROL_CHARS_RE.test(value) || !(credentialPattern(field)?.test(value) ?? true)) {
+        issues.push({ path, message: 'Format invalide.' })
+      }
     }
   }
   if (issues.length > 0) throw new CredentialsError(issues)
@@ -51,6 +62,7 @@ export function splitCredentials(
   const config: Record<string, string> = {}
   const secretFields: Record<string, string> = {}
   for (const field of integration.credentialsSchema) {
+    if (!Object.hasOwn(credentials, field.key)) continue
     const value = credentials[field.key]!
     if (field.secret) secretFields[field.key] = value
     else config[field.key] = value
