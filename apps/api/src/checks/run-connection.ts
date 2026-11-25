@@ -77,10 +77,79 @@ function redactingLogger(base: Logger, secrets: string[]): Logger {
   return { debug: wrap('debug'), info: wrap('info'), warn: wrap('warn'), error: wrap('error') }
 }
 
-/** Only absolute https URLs: no plain http, no file:, no relative URL. Throws TypeError otherwise. */
-function assertHttps(input: Parameters<typeof fetch>[0]): void {
-  const raw = input instanceof Request ? input.url : String(input)
-  if (new URL(raw).protocol !== 'https:') throw new TypeError('ctx.fetch only allows https: URLs')
+const DEFAULT_METHODS: readonly string[] = ['GET', 'HEAD']
+
+interface ValidatedRequest {
+  url: URL
+  method: string
+}
+
+/**
+ * Only absolute https URLs on an allowed host, default port, no embedded credentials, allowed
+ * method. Throws a TypeError with a generic message (never the URL) otherwise. Returns the
+ * validated snapshot, which is what must be sent: the input is read exactly once.
+ */
+function assertAllowed(
+  integration: Readonly<Integration>,
+  input: Parameters<typeof fetch>[0],
+  init: RequestInit | undefined,
+): ValidatedRequest {
+  const request = input instanceof Request ? input : undefined
+  const url = new URL(request ? request.url : String(input))
+  if (url.protocol !== 'https:') throw new TypeError('ctx.fetch only allows https: URLs')
+  if (!integration.allowedHosts?.includes(url.hostname.toLowerCase())) {
+    throw new TypeError('ctx.fetch: host not allowed for this integration')
+  }
+  if (url.username !== '' || url.password !== '' || url.port !== '') {
+    throw new TypeError('ctx.fetch: credentials and custom ports are not allowed in URLs')
+  }
+  const method = String(init?.method ?? request?.method ?? 'GET').toUpperCase()
+  if (!(integration.allowedMethods ?? DEFAULT_METHODS).includes(method)) {
+    throw new TypeError('ctx.fetch: method not allowed for this integration')
+  }
+  return { url, method }
+}
+
+export const DEFAULT_JSON_MAX_BYTES = 1024 * 1024
+export const HARD_JSON_MAX_BYTES = 10 * 1024 * 1024
+
+const BAD_BODY = 'response body unreadable or too large'
+
+/** Builds `ctx.readJson`: parses a JSON body with a streaming size cap (see the SDK types). */
+export function createReadJson(): IntegrationContext['readJson'] {
+  return async (response, maxBytes = DEFAULT_JSON_MAX_BYTES) => {
+    const cap = Number.isFinite(maxBytes)
+      ? Math.min(Math.max(Math.trunc(maxBytes), 0), HARD_JSON_MAX_BYTES)
+      : DEFAULT_JSON_MAX_BYTES
+    const declared = response.headers.get('content-length')
+    if (declared !== null && Number(declared) > cap) throw new Error(BAD_BODY)
+    if (!response.body) throw new Error(BAD_BODY)
+
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > cap) {
+        await reader.cancel().catch(() => {})
+        throw new Error(BAD_BODY)
+      }
+      chunks.push(value)
+    }
+    const bytes = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    try {
+      return JSON.parse(new TextDecoder('utf-8', { fatal: false }).decode(bytes))
+    } catch {
+      throw new Error('response body is not valid JSON')
+    }
+  }
 }
 
 /** Runs every check of the integration for one connection, sequentially. Never throws. */
@@ -113,6 +182,7 @@ export async function runConnectionChecks(
 
   const results: NewCheckResult[] = []
   const started: Promise<unknown>[] = []
+  const readJson = createReadJson()
   for (const check of integration.checks) {
     const timeout = new AbortController()
     const signals = [timeout.signal]
@@ -120,15 +190,27 @@ export async function runConnectionChecks(
     const signal = AbortSignal.any(signals)
 
     const ctxFetch: typeof fetch = async (input, init) => {
-      assertHttps(input)
-      const callerSignal = init?.signal
-      return opts.fetch(input, {
-        ...init,
-        redirect: init?.redirect ?? 'error',
+      // Snapshot init once: getters on it must not return different values later.
+      const snapshot: RequestInit = { ...init }
+      const { url, method } = assertAllowed(integration, input, snapshot)
+      const callerSignal = snapshot.signal
+      // Redirects are never followed: the allowlist only covers the first URL.
+      const safeInit: RequestInit = {
+        ...snapshot,
+        method,
+        redirect: 'error',
         signal: callerSignal ? AbortSignal.any([signal, callerSignal]) : signal,
-      })
+      }
+      // Send the validated snapshot, not the (possibly mutable) caller input.
+      return opts.fetch(input instanceof Request ? input : url.href, safeInit)
     }
-    const ctx: IntegrationContext = { credentials, fetch: ctxFetch, logger: safeLogger, signal }
+    const ctx: IntegrationContext = {
+      credentials,
+      fetch: ctxFetch,
+      logger: safeLogger,
+      signal,
+      readJson,
+    }
 
     let timer: NodeJS.Timeout | undefined
     let onAbort: (() => void) | undefined

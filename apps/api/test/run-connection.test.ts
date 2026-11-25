@@ -6,7 +6,7 @@ import type {
   Logger,
 } from '@switchyard/plugin-sdk'
 import { describe, expect, it, vi } from 'vitest'
-import { runConnectionChecks } from '../src/checks/run-connection.js'
+import { createReadJson, runConnectionChecks } from '../src/checks/run-connection.js'
 import { splitCredentials } from '../src/connections/credentials.js'
 import { createSecretBox } from '../src/crypto/secrets.js'
 import type { RunnableConnection } from '../src/store/types.js'
@@ -28,7 +28,7 @@ const ok = (checkId: string, extra: Partial<CheckResult> = {}): CheckResult => (
 
 const checkOf = (id: string, run: Check['run']): Check => ({ id, title: id, run })
 
-const integrationOf = (checks: Check[]): Integration => ({
+const integrationOf = (checks: Check[], extra: Partial<Integration> = {}): Integration => ({
   id: 'fake',
   name: 'Fake',
   credentialsSchema: [
@@ -36,6 +36,8 @@ const integrationOf = (checks: Check[]): Integration => ({
     { key: 'teamId', label: 'Team', secret: false },
   ],
   checks,
+  allowedHosts: ['example.test'],
+  ...extra,
 })
 
 function connection(
@@ -229,14 +231,17 @@ describe('runConnectionChecks', () => {
     )
     const caller = new AbortController()
     let ctxSignal: AbortSignal | undefined
-    const integration = integrationOf([
-      checkOf('a', async (ctx) => {
-        ctxSignal = ctx.signal
-        await ctx.fetch('https://example.test/a')
-        await ctx.fetch('https://example.test/b', { method: 'POST', signal: caller.signal })
-        return ok('a')
-      }),
-    ])
+    const integration = integrationOf(
+      [
+        checkOf('a', async (ctx) => {
+          ctxSignal = ctx.signal
+          await ctx.fetch('https://example.test/a')
+          await ctx.fetch('https://example.test/b', { method: 'POST', signal: caller.signal })
+          return ok('a')
+        }),
+      ],
+      { allowedMethods: ['GET', 'POST'] },
+    )
     await run(integration, connection(integration), {
       fetch: baseFetch as unknown as typeof fetch,
     }).promise
@@ -319,19 +324,26 @@ describe('runConnectionChecks', () => {
 
   describe('ctx.fetch guard', () => {
     const fetchSpy = () => vi.fn<typeof fetch>(async () => new Response('ok'))
-    async function attempt(input: string | URL, init?: RequestInit) {
+    async function attempt(
+      input: string | URL | Request,
+      init?: RequestInit,
+      extra: Partial<Integration> = {},
+    ) {
       const base = fetchSpy()
       let error: unknown
-      const integration = integrationOf([
-        checkOf('a', async (ctx) => {
-          try {
-            await ctx.fetch(input, init)
-          } catch (err) {
-            error = err
-          }
-          return ok('a')
-        }),
-      ])
+      const integration = integrationOf(
+        [
+          checkOf('a', async (ctx) => {
+            try {
+              await ctx.fetch(input, init)
+            } catch (err) {
+              error = err
+            }
+            return ok('a')
+          }),
+        ],
+        extra,
+      )
       await run(integration, connection(integration), { fetch: base as unknown as typeof fetch })
         .promise
       return { base, error }
@@ -352,15 +364,192 @@ describe('runConnectionChecks', () => {
       expect(base).not.toHaveBeenCalled()
     })
 
+    it.each(['https://other.test/a', 'https://sub.example.test/a', 'https://example.test.evil/a'])(
+      'rejects the host in %s',
+      async (url) => {
+        const { base, error } = await attempt(url)
+        expect(error).toBeInstanceOf(TypeError)
+        expect(base).not.toHaveBeenCalled()
+      },
+    )
+
+    it('accepts a mixed-case host that is allowed', async () => {
+      const { base, error } = await attempt('https://EXAMPLE.test/a')
+      expect(error).toBeUndefined()
+      expect(base).toHaveBeenCalledOnce()
+    })
+
+    it.each([undefined, []])('blocks every request when allowedHosts is %j', async (hosts) => {
+      const { base, error } = await attempt('https://example.test/a', undefined, {
+        allowedHosts: hosts,
+      })
+      expect(error).toBeInstanceOf(TypeError)
+      expect(base).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      'https://user:pw@example.test/a',
+      'https://user@example.test/a',
+      'https://example.test:8443/a',
+    ])('rejects credentials or custom port in %s', async (url) => {
+      const { base, error } = await attempt(url)
+      expect(error).toBeInstanceOf(TypeError)
+      expect(base).not.toHaveBeenCalled()
+    })
+
+    it('accepts the default https port', async () => {
+      const { error } = await attempt('https://example.test:443/a')
+      expect(error).toBeUndefined()
+    })
+
+    it.each(['POST', 'post', 'DELETE'])('rejects method %s by default', async (method) => {
+      const { base, error } = await attempt('https://example.test/a', { method })
+      expect(error).toBeInstanceOf(TypeError)
+      expect(base).not.toHaveBeenCalled()
+    })
+
+    it('accepts a lowercase GET and HEAD by default', async () => {
+      expect((await attempt('https://example.test/a', { method: 'get' })).error).toBeUndefined()
+      expect((await attempt('https://example.test/a', { method: 'HEAD' })).error).toBeUndefined()
+    })
+
+    it('uses the method of a Request object', async () => {
+      const blocked = await attempt(new Request('https://example.test/a', { method: 'POST' }))
+      expect(blocked.error).toBeInstanceOf(TypeError)
+      expect(blocked.base).not.toHaveBeenCalled()
+      const hostBlocked = await attempt(new Request('https://other.test/a'))
+      expect(hostBlocked.error).toBeInstanceOf(TypeError)
+      const ok = await attempt(new Request('https://example.test/a'))
+      expect(ok.error).toBeUndefined()
+    })
+
+    it('honors allowedMethods and does not put the URL in the error', async () => {
+      const allowed = await attempt(
+        'https://example.test/a',
+        { method: 'post' },
+        { allowedMethods: ['POST'] },
+      )
+      expect(allowed.error).toBeUndefined()
+      const { error } = await attempt('https://other.test/secret-path')
+      expect((error as Error).message).not.toMatch(/other\.test|secret-path/)
+    })
+
     it('defaults to redirect: error', async () => {
       const { base, error } = await attempt('https://example.test/a')
       expect(error).toBeUndefined()
       expect(base.mock.calls[0]![1]!.redirect).toBe('error')
     })
 
-    it('keeps an explicit redirect option', async () => {
-      const { base } = await attempt('https://example.test/a', { redirect: 'manual' })
-      expect(base.mock.calls[0]![1]!.redirect).toBe('manual')
+    it('never follows redirects, even when the plugin asks for it', async () => {
+      for (const redirect of ['follow', 'manual'] as const) {
+        const { base } = await attempt('https://example.test/a', { redirect })
+        expect(base.mock.calls[0]![1]!.redirect).toBe('error')
+      }
+    })
+
+    it('sends the validated URL snapshot, not a mutable input', async () => {
+      let calls = 0
+      const sneaky = {
+        toString: () => (calls++ === 0 ? 'https://example.test/a' : 'https://evil.test/steal'),
+      }
+      const { base, error } = await attempt(sneaky as unknown as string)
+      expect(error).toBeUndefined()
+      expect(base.mock.calls[0]![0]).toBe('https://example.test/a')
+    })
+
+    it('reads init.method once and sends the validated method', async () => {
+      let reads = 0
+      const init = {
+        get method() {
+          return reads++ === 0 ? 'GET' : 'DELETE'
+        },
+      } as RequestInit
+      const { base, error } = await attempt('https://example.test/a', init)
+      expect(error).toBeUndefined()
+      expect(reads).toBe(1)
+      expect(base.mock.calls[0]![1]!.method).toBe('GET')
+    })
+
+    it('passes a Request input through with the validated init', async () => {
+      const req = new Request('https://example.test/a')
+      const { base } = await attempt(req, { redirect: 'follow' })
+      expect(base.mock.calls[0]![0]).toBe(req)
+      expect(base.mock.calls[0]![1]!.redirect).toBe('error')
+      expect(base.mock.calls[0]![1]!.method).toBe('GET')
+    })
+  })
+
+  describe('ctx.readJson', () => {
+    const readJson = createReadJson()
+    const MB = 1024 * 1024
+    const streamOf = (chunks: Uint8Array[], onCancel?: () => void) =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const c of chunks) controller.enqueue(c)
+            controller.close()
+          },
+          cancel: onCancel,
+        }),
+      )
+
+    it('parses a small JSON body', async () => {
+      await expect(readJson(new Response('{"a":[1,2]}'))).resolves.toEqual({ a: [1, 2] })
+    })
+
+    it('rejects a declared content-length above the cap', async () => {
+      const res = new Response('{}', { headers: { 'content-length': String(MB + 1) } })
+      await expect(readJson(res)).rejects.toThrow(/too large/)
+      await expect(
+        readJson(new Response('{}', { headers: { 'content-length': '11' } }), 10),
+      ).rejects.toThrow()
+    })
+
+    it('cancels an undeclared stream as soon as it exceeds the cap', async () => {
+      let cancelled = false
+      const chunk = new Uint8Array(600)
+      const res = streamOf([chunk, chunk, chunk], () => (cancelled = true))
+      await expect(readJson(res, 1000)).rejects.toThrow(/too large/)
+      expect(cancelled).toBe(true)
+    })
+
+    it('counts bytes, not characters', async () => {
+      const body = JSON.stringify('é'.repeat(100)) // 100 chars, 200+ bytes
+      await expect(readJson(new Response(body), 150)).rejects.toThrow()
+      await expect(readJson(new Response(body), 300)).resolves.toBe('é'.repeat(100))
+    })
+
+    it('decodes multibyte characters split across chunks', async () => {
+      const bytes = new TextEncoder().encode('"é"')
+      const res = streamOf([bytes.slice(0, 2), bytes.slice(2)])
+      await expect(readJson(res)).resolves.toBe('é')
+    })
+
+    it('rejects invalid JSON with a generic error', async () => {
+      await expect(readJson(new Response('{nope'))).rejects.toThrow(
+        'response body is not valid JSON',
+      )
+    })
+
+    it('rejects a null body', async () => {
+      await expect(readJson(new Response(null, { status: 204 }))).rejects.toThrow()
+    })
+
+    it('clamps the cap to 10 MB', async () => {
+      const res = new Response('{}', { headers: { 'content-length': String(10 * MB + 1) } })
+      await expect(readJson(res, 100 * MB)).rejects.toThrow()
+    })
+
+    it('is exposed on ctx', async () => {
+      let type: string | undefined
+      const integration = integrationOf([
+        checkOf('a', async (ctx) => {
+          type = typeof ctx.readJson
+          return ok('a')
+        }),
+      ])
+      await run(integration, connection(integration)).promise
+      expect(type).toBe('function')
     })
   })
 
