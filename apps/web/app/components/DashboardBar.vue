@@ -38,7 +38,7 @@ async function onLogout() {
     <div class="account">
       <span v-if="user" class="email">{{ user.email }}</span>
       <button class="btn btn-light" type="button" :disabled="pending" @click="onLogout">
-        {{ pending ? 'Déconnexion…' : 'Se déconnecter' }}
+        <PixelIcon name="logout" />{{ pending ? 'Déconnexion…' : 'Se déconnecter' }}
       </button>
     </div>
   </header>
