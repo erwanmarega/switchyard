@@ -3,7 +3,8 @@
 // Only the keys listed below are written; every other line is preserved. Files are created from
 // .env.example when missing, with mode 0600. Only key NAMES are printed, never values.
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -40,13 +41,41 @@ export function upsertEnv(text, entries) {
   return `${lines.join('\n')}\n`
 }
 
-function writeEnvFile(relativePath, entries) {
+/** Returns the trimmed, unquoted value of `KEY=value` in an env file's text ('' when absent). */
+export function readEnvValue(text, key) {
+  for (const line of text.split('\n')) {
+    const match = new RegExp(`^\\s*${key}\\s*=(.*)$`).exec(line)
+    if (match)
+      return match[1]
+        .trim()
+        .replace(/^(["'])(.*)\1$/, '$2')
+        .trim()
+  }
+  return ''
+}
+
+/** `entries` plus a fresh encryption key, unless `text` already holds a non-empty one. */
+export function withEncryptionKey(
+  text,
+  entries,
+  generate = () => randomBytes(32).toString('base64'),
+) {
+  if (readEnvValue(text, 'SWITCHYARD_ENCRYPTION_KEY') !== '') return entries
+  return { ...entries, SWITCHYARD_ENCRYPTION_KEY: generate() }
+}
+
+function writeEnvFile(relativePath, entries, { encryptionKey = false } = {}) {
   const path = join(root, relativePath)
   const example = `${path}.example`
   const source = existsSync(path) ? path : existsSync(example) ? example : null
   const text = source ? readFileSync(source, 'utf8') : ''
-  writeFileSync(path, upsertEnv(text, entries), { mode: 0o600 })
-  chmodSync(path, 0o600)
+  // Never overwrite an existing key: stored tokens would become unreadable.
+  if (encryptionKey) entries = withEncryptionKey(text, entries)
+  // Atomic replace (temp file + rename): a crash mid-write must never lose the encryption key.
+  const tmp = `${path}.${process.pid}.tmp`
+  writeFileSync(tmp, upsertEnv(text, entries), { mode: 0o600 })
+  chmodSync(tmp, 0o600)
+  renameSync(tmp, path)
   console.log(`${relativePath}: wrote ${Object.keys(entries).join(', ')}`)
 }
 
@@ -61,7 +90,11 @@ function main() {
   // The API only needs public values (it verifies tokens through the JWKS); the web app only gets
   // the publishable key, read by its server (private runtime config, never sent to the browser).
   // The secret / service-role keys are never written anywhere.
-  writeEnvFile('apps/api/.env', { DATABASE_URL: status.DB_URL, SUPABASE_URL: status.API_URL })
+  writeEnvFile(
+    'apps/api/.env',
+    { DATABASE_URL: status.DB_URL, SUPABASE_URL: status.API_URL },
+    { encryptionKey: true },
+  )
   writeEnvFile('apps/web/.env', {
     SUPABASE_URL: status.API_URL,
     SUPABASE_KEY: status.PUBLISHABLE_KEY,

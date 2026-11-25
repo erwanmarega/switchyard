@@ -7,8 +7,14 @@ import Fastify, {
 import { createRequireAuth } from './auth/guard.js'
 import { createTokenVerifier, remoteKeySet, type TokenVerifier } from './auth/jwt.js'
 import { loadConfig, type Config } from './config.js'
-import { openDatabase, type Database } from './db/index.js'
+import { createSecretBox, type SecretBox } from './crypto/secrets.js'
+import { openDatabase, type Database, type PostgresDatabase } from './db/index.js'
 import { createDefaultRegistry, type IntegrationRegistry } from './integrations/registry.js'
+import { connectionRoutes } from './routes/connections.js'
+import { pathRoutes } from './routes/path.js'
+import { projectRoutes } from './routes/projects.js'
+import { createPostgresStore } from './store/postgres.js'
+import type { Store } from './store/types.js'
 
 export const VERSION = '0.1.0'
 
@@ -18,6 +24,10 @@ export interface BuildAppOptions {
   config?: Config
   /** Defaults to a lazy Postgres client built from `config.DATABASE_URL`. */
   db?: Database
+  /** Defaults to the Postgres store on the database opened by the app. Required with `db`. */
+  store?: Store
+  /** Defaults to a box keyed by `config.SWITCHYARD_ENCRYPTION_KEY`. */
+  secretBox?: SecretBox
   /** Defaults to local verification against the Supabase JWKS; tests inject their own keys. */
   verifyToken?: TokenVerifier
 }
@@ -43,7 +53,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       : false,
   })
   const registry = options.registry ?? createDefaultRegistry()
-  const db = options.db ?? openDatabase(config.DATABASE_URL, config.DATABASE_SSL)
+  if (options.db && !options.store) {
+    throw new Error('buildApp: an injected `db` requires an explicit `store`')
+  }
+  let ownedDb: PostgresDatabase | undefined
+  if (!options.db) ownedDb = openDatabase(config.DATABASE_URL, config.DATABASE_SSL)
+  const db: Database = options.db ?? ownedDb!
+  const store = options.store ?? createPostgresStore(ownedDb!.sql)
+  const secretBox = options.secretBox ?? createSecretBox(config.SWITCHYARD_ENCRYPTION_KEY)
   const verifyToken =
     options.verifyToken ??
     createTokenVerifier(config.SUPABASE_URL, remoteKeySet(config.SUPABASE_URL))
@@ -111,8 +128,17 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       id: i.id,
       name: i.name,
       checks: i.checks.map((c) => c.id),
+      credentialsSchema: i.credentialsSchema.map((f) => ({
+        key: f.key,
+        label: f.label,
+        secret: f.secret,
+      })),
     })),
   }))
+
+  app.register(projectRoutes(store))
+  app.register(connectionRoutes(store, registry, secretBox))
+  app.register(pathRoutes(store))
 
   return app
 }

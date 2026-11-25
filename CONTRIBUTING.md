@@ -58,5 +58,7 @@ npm run lint           # ESLint (lint:fix pour corriger)
 npm run format         # Prettier (format:check pour vérifier)
 npm run typecheck      # types de tous les workspaces
 npm test               # Vitest (test:watch en continu)
+SWITCHYARD_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres npm test
+                       # + tests Postgres (isolation RLS) sur la pile locale
 npm run build          # build de tous les workspaces
 ```

@@ -11,6 +11,10 @@ export class IntegrationRegistry {
     this.integrations.set(integration.id, integration)
   }
 
+  get(id: string): Readonly<Integration> | undefined {
+    return this.integrations.get(id)
+  }
+
   list(): Readonly<Integration>[] {
     return [...this.integrations.values()]
   }

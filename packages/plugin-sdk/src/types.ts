@@ -47,6 +47,8 @@ export interface PathNode {
   id: string
   integrationId: string
   label: string
+  /** Connection (credentials) bound to this node, if any. */
+  connectionId?: string | null
 }
 
 export interface PathEdge {
