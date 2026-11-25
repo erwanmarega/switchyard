@@ -12,8 +12,8 @@ export default defineNuxtConfig({
     '@fontsource-variable/inter',
     '@fontsource/jetbrains-mono/400.css',
     '@fontsource/jetbrains-mono/500.css',
+    '@fontsource/jetbrains-mono/600.css',
     '~/assets/css/tokens.css',
-    '~/assets/css/main.css',
   ],
   app: {
     head: {

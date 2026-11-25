@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "dev:web": "npm run dev -w @switchyard/web",
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:hosted": "concurrently -k -n api,web -c cyan,magenta \"npm run dev:hosted -w @switchyard/api\" \"npm run dev:hosted -w @switchyard/web\"",
     "db:start": "supabase start",
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",

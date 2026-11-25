@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env --conditions=source src/server.ts",
+    "dev:hosted": "tsx watch --env-file=.env.hosted --conditions=source src/server.ts",
     "build": "npm run build -w @switchyard/plugin-sdk && tsc -p tsconfig.build.json",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc --noEmit"
