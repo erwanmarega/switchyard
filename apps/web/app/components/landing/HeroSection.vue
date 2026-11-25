@@ -1,5 +1,6 @@
 <script setup>
 import NavBar from './NavBar.vue'
+import HeroSmoke from './HeroSmoke.vue'
 
 const marks = ['Vercel', 'Stripe', 'Cloudflare', 'Supabase', 'AWS', 'Resend']
 </script>
@@ -12,10 +13,11 @@ const marks = ['Vercel', 'Stripe', 'Cloudflare', 'Supabase', 'AWS', 'Resend']
       alt=""
       aria-hidden="true"
       width="2400"
-      height="1400"
+      height="1350"
       fetchpriority="high"
       decoding="async"
     />
+    <HeroSmoke />
     <div class="shade" aria-hidden="true"></div>
 
     <NavBar />
