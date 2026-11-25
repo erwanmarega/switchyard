@@ -16,13 +16,12 @@
   --status-warn-text: #8f4c00;
   --status-bad-text: #a52a1e;
 
-  /* Dashboard (white editorial) */
+  /* Dashboard (paper editorial) */
   --dash-ink: #14213d;
   --dash-muted: #4a5170;
   --dash-faint: #8a90a6;
-  --dash-line: #d8dce5;
-  --dash-panel: #f5f6f8;
-  --amber: #e9a23b;
+  --dash-line: #d9d3c3;
+  --dash-panel: #ebe6d8;
 
   --font-pixel: 'Geist Pixel', 'Courier New', monospace;
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;

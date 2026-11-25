@@ -18,8 +18,10 @@ const starters = ['Domaine', 'Cloudflare', 'Vercel', 'Supabase', 'Stripe', 'Rese
       </p>
     </div>
     <div class="actions">
-      <a href="#integrations" class="btn amber">+ Ajouter un outil</a>
-      <a href="#integrations" class="btn outline">Lire le guide d'installation</a>
+      <a href="#integrations" class="btn signal"><PixelIcon name="plus" />Ajouter un outil</a>
+      <a href="#integrations" class="btn outline"
+        ><PixelIcon name="book" />Lire le guide d'installation</a
+      >
     </div>
     <div class="starters">
       <span class="label">OU CHOISIS UNE GARE DE DÉPART</span>
@@ -40,7 +42,7 @@ const starters = ['Domaine', 'Cloudflare', 'Vercel', 'Supabase', 'Stripe', 'Rese
   gap: 28px;
   padding: 40px 32px 56px;
   border-top: 1px solid var(--dash-line);
-  background-color: #fff;
+  background-color: var(--paper);
   background-image: radial-gradient(circle, rgba(27, 58, 140, 0.09) 1px, transparent 1.4px);
   background-size: 7px 7px;
 }
@@ -76,6 +78,7 @@ h2 {
 .btn {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
   min-height: 48px;
   padding: 0 22px;
   border: 1px solid var(--prussian);
@@ -85,12 +88,16 @@ h2 {
   font-weight: 500;
   text-decoration: none;
 }
-.btn.amber {
-  border-color: var(--dash-ink);
-  background: var(--amber);
-  color: var(--dash-ink);
+.btn.signal {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: #fff;
   font-size: 15px;
   font-weight: 600;
+}
+.btn.signal:hover {
+  border-color: #c0481a;
+  background: #c0481a;
 }
 .starters {
   display: flex;
@@ -117,7 +124,7 @@ h2 {
   min-height: 44px;
   padding: 0 16px;
   border: 1px solid var(--dash-line);
-  background: #fff;
+  background: var(--paper);
   color: var(--prussian);
   font-family: var(--font-mono);
   font-size: 14px;

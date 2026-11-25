@@ -59,7 +59,7 @@ function names(id: string, side: 'upstream' | 'downstream'): string {
   margin: 0;
   padding: 0;
   list-style: none;
-  background: #fff;
+  background: var(--paper);
 }
 .row {
   border-bottom: 1px solid var(--dash-line);
@@ -99,7 +99,7 @@ function names(id: string, side: 'upstream' | 'downstream'): string {
   height: 22px;
   border: 5px solid;
   border-radius: 50%;
-  background: #fff;
+  background: var(--paper);
 }
 .ident {
   display: flex;

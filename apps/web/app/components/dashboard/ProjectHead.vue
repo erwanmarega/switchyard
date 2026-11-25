@@ -38,6 +38,16 @@ const relative = computed(() => {
 
 <template>
   <section class="head" aria-labelledby="project-title">
+    <img
+      class="bg"
+      src="/img/dash-band.webp"
+      alt=""
+      aria-hidden="true"
+      width="2400"
+      height="520"
+      decoding="async"
+    />
+    <div class="shade" aria-hidden="true"></div>
     <div class="info">
       <span class="label">PROJET</span>
       <h1 id="project-title">{{ project.name }}</h1>
@@ -65,22 +75,48 @@ const relative = computed(() => {
         aria-describedby="recheck-note"
         title="Bientôt : vérifications réelles"
       >
-        Revérifier
+        <PixelIcon name="refresh" />Revérifier
       </button>
       <span id="recheck-note" class="sr-only">Bientôt : vérifications réelles</span>
-      <a href="#integrations" class="btn amber">+ Ajouter un outil</a>
+      <a href="#integrations" class="btn signal"><PixelIcon name="plus" />Ajouter un outil</a>
     </div>
   </section>
 </template>
 
 <style scoped>
 .head {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 20px;
-  padding: 28px 32px 20px;
+  padding: 48px 32px 28px;
+  overflow: hidden;
+  background-color: var(--prussian);
+  color: var(--paper);
+}
+.bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+.shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(27, 58, 140, 0.78) 0%,
+    rgba(27, 58, 140, 0.35) 45%,
+    rgba(27, 58, 140, 0) 70%
+  );
+}
+.info,
+.actions {
+  position: relative;
 }
 .info {
   display: flex;
@@ -91,12 +127,13 @@ const relative = computed(() => {
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.12em;
-  color: var(--dash-muted);
+  color: var(--paper);
+  opacity: 0.8;
 }
 h1 {
   font-size: 48px;
   line-height: 1;
-  color: var(--prussian);
+  color: var(--paper);
   overflow-wrap: anywhere;
 }
 .meta {
@@ -111,7 +148,8 @@ h1 {
   align-items: center;
   gap: 8px;
   padding: 4px 10px;
-  border: 1px solid currentColor;
+  background: var(--paper);
+  color: var(--navy-ink);
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 600;
@@ -138,7 +176,8 @@ h1 {
   color: var(--prussian);
 }
 .when {
-  color: var(--dash-muted);
+  color: var(--paper);
+  opacity: 0.8;
 }
 .actions {
   display: flex;
@@ -149,12 +188,13 @@ h1 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   min-height: 44px;
   padding: 0 18px;
-  border: 1px solid var(--prussian);
+  border: 1px solid var(--paper);
   border-radius: 0;
   background: transparent;
-  color: var(--prussian);
+  color: var(--paper);
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 500;
@@ -165,18 +205,25 @@ h1 {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.btn.amber {
-  border-color: var(--dash-ink);
-  background: var(--amber);
-  color: var(--dash-ink);
+.btn.signal {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: #fff;
   font-weight: 600;
 }
+.btn.signal:hover {
+  border-color: #c0481a;
+  background: #c0481a;
+}
 .btn:focus-visible {
-  outline-color: var(--prussian);
+  outline-color: var(--paper);
 }
 @media (max-width: 820px) {
   .head {
-    padding: 24px 20px 16px;
+    padding: 40px 20px 20px;
+  }
+  .shade {
+    background: linear-gradient(0deg, rgba(27, 58, 140, 0.85) 0%, rgba(27, 58, 140, 0.3) 70%);
   }
   h1 {
     font-size: 36px;

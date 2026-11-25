@@ -28,9 +28,7 @@ const action = computed(() => {
     <div class="top">
       <span class="label">GARE SÉLECTIONNÉE</span>
       <button type="button" class="close" aria-label="Fermer le panneau" @click="emit('close')">
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" fill="none" />
-        </svg>
+        <PixelIcon name="close" />
       </button>
     </div>
 
@@ -175,7 +173,7 @@ const action = computed(() => {
   height: 22px;
   border: 5px solid;
   border-radius: 50%;
-  background: #fff;
+  background: var(--paper);
 }
 h2 {
   font-family: var(--font-mono);

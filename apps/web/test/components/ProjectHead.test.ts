@@ -63,7 +63,7 @@ describe('ProjectHead', () => {
     expect(recheck.attributes('aria-disabled')).toBe('true')
     expect(recheck.attributes('title')).toBe('Bientôt : vérifications réelles')
     const add = wrapper.find('a')
-    expect(add.text()).toBe('+ Ajouter un outil')
+    expect(add.text()).toBe('Ajouter un outil')
     expect(add.attributes('href')).toBe('#integrations')
   })
 })

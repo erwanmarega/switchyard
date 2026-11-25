@@ -75,7 +75,7 @@ const { data, error, status } = await useFetch<{ integrations: IntegrationSummar
 <style scoped>
 .page {
   min-height: 100vh;
-  background: #fff;
+  background: var(--paper);
   color: var(--dash-ink);
 }
 .columns {
@@ -87,7 +87,7 @@ const { data, error, status } = await useFetch<{ integrations: IntegrationSummar
   flex: 999 1 640px;
   min-width: 0;
   padding: 24px 32px;
-  background: #fff;
+  background: var(--paper);
 }
 .side {
   flex: 1 1 360px;
@@ -98,7 +98,7 @@ const { data, error, status } = await useFetch<{ integrations: IntegrationSummar
 }
 .integrations {
   border-top: 1px solid var(--dash-line);
-  background: #fff;
+  background: var(--paper);
 }
 @media (max-width: 820px) {
   .main {

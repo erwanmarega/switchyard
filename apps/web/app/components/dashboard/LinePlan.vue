@@ -299,7 +299,7 @@ watch(
   position: relative;
   height: 460px;
   overflow: hidden;
-  background: #fff;
+  background: var(--paper);
   color: var(--dash-ink);
 }
 .canvas {
@@ -325,7 +325,7 @@ watch(
   white-space: nowrap;
   cursor: pointer;
   font: inherit;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(244, 241, 232, 0.94);
   border: 1px solid transparent;
   border-radius: 0;
 }
@@ -359,7 +359,7 @@ watch(
   letter-spacing: 0.05em;
   white-space: nowrap;
   pointer-events: none;
-  background: #fff;
+  background: var(--paper);
   color: var(--dash-ink);
 }
 .tag-cause {
@@ -376,7 +376,7 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  background: var(--paper);
 }
 .loading-text {
   font-family: var(--font-mono);
@@ -390,14 +390,14 @@ watch(
   z-index: 3;
   display: flex;
   border: 1px solid var(--prussian);
-  background: #fff;
+  background: var(--paper);
 }
 .toggle-btn {
   height: 36px;
   padding: 0 14px;
   border: none;
   border-radius: 0;
-  background: #fff;
+  background: var(--paper);
   color: var(--prussian);
   font-family: var(--font-mono);
   font-size: 12px;
