@@ -3,21 +3,21 @@ import {
   BufferGeometry,
   CylinderGeometry,
   DoubleSide,
-  Float32BufferAttribute,
   Material,
   Mesh,
   MeshBasicMaterial,
   OrthographicCamera,
-  Points,
-  PointsMaterial,
+  PlaneGeometry,
   Raycaster,
   RingGeometry,
   Scene,
+  ShaderMaterial,
   Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three'
 import type { CheckStatus } from '@switchyard/plugin-sdk'
+import { createHalftonePass, HALFTONE_LAYER, toneColor } from '~/three/halftone-pass'
 import type { LinePlanLayout, Point2 } from '~/three/line-plan-layout'
 
 export type LinePlanView = 'persp' | 'plan'
@@ -44,7 +44,7 @@ export interface LinePlanController {
 
 // Tunables.
 const BLUE = 0x1b3a8c
-const DIM = 0xbcc6e2
+const PAPER = 0xf4f1e8
 const RED = 0xc0392b
 const STATUS_COLORS: Record<CheckStatus, [light: number, dark: number]> = {
   ok: [0x2f7d4a, 0x1f5a34],
@@ -64,10 +64,16 @@ const PAD_X = 1.6
 const PAD_Z = 2
 const MIN_SPAN_X = 6
 const MIN_SPAN_Z = 3
-const DOT_STEP = 0.26
-const DOT_MARGIN_X = 2.6
-const DOT_MARGIN_Z = 1
-const MAX_DOTS = 12000
+/** Extra world units of ground tint around the padded bounds. */
+const TINT_MARGIN_X = 2.6
+const TINT_MARGIN_Z = 1
+/** Halftone darkness (0..1) of the decor layers. */
+const TINT_DARKNESS = 0.12
+const EMBANKMENT_DARKNESS = 0.3
+const EMBANKMENT_WIDTH = 0.55
+const STATION_HALO_DARKNESS = 0.35
+const STATION_HALO_RADIUS = 0.6
+const DIM_DARKNESS = 0.45
 const CLICK_SLOP = 5
 const PACKET_SPACING = 1.8
 const PACKET_SPEED = 1
@@ -115,7 +121,11 @@ interface PacketFlow {
   items: Packet[]
 }
 
-/** The 3D "plan de ligne": flat tracks and two-tone station rings on a faint dot grid. */
+/**
+ * The 3D "plan de ligne": flat tracks and two-tone station rings, sharp and in colour. Decor
+ * (ground tint, embankments, station halos, dimmed tracks) is drawn as a screen-space blue
+ * halftone underneath, see halftone-pass.ts.
+ */
 export function createLinePlan(
   canvas: HTMLCanvasElement,
   options: LinePlanOptions,
@@ -129,6 +139,8 @@ export function createLinePlan(
   const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.setClearColor(0xffffff, 0)
+  renderer.autoClear = false
+  const halftone = createHalftonePass(renderer, BLUE)
   const scene = new Scene()
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 200)
   canvas.style.touchAction = 'pan-y'
@@ -146,38 +158,67 @@ export function createLinePlan(
     return g
   }
 
-  // Dot grid (decoration).
-  const dots: number[] = []
-  const gridX = (spanX + DOT_MARGIN_X) / 2
-  const gridZ = (spanZ + DOT_MARGIN_Z) / 2
-  for (let x = -gridX; x <= gridX && dots.length < MAX_DOTS * 3; x += DOT_STEP) {
-    for (let z = -gridZ; z <= gridZ; z += DOT_STEP) dots.push(center.x + x, 0, center.z + z)
+  // Halftone decor: tone materials are grey, the pass turns darkness into dot size.
+  const tone = (darkness: number) => {
+    const m = new MeshBasicMaterial({ color: toneColor(darkness) })
+    materials.push(m)
+    return m
   }
-  const dotGeometry = geo(new BufferGeometry())
-  dotGeometry.setAttribute('position', new Float32BufferAttribute(dots, 3))
-  const dotMaterial = new PointsMaterial({
-    color: BLUE,
-    size: 2,
-    sizeAttenuation: false,
-    transparent: true,
-    opacity: 0.14,
-  })
-  materials.push(dotMaterial)
-  scene.add(new Points(dotGeometry, dotMaterial))
+  const decor = <T extends Mesh>(mesh: T): T => {
+    mesh.layers.set(HALFTONE_LAYER)
+    scene.add(mesh)
+    return mesh
+  }
 
-  const bar = (a: Point2, b: Point2, color: number, width = 0.13) => {
+  // Ground tint: faint screen fading out toward the edges, like a printed map.
+  const tintMaterial = new ShaderMaterial({
+    vertexShader:
+      'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader: `varying vec2 vUv;void main(){
+      vec2 e=min(vUv,1.0-vUv);
+      float f=smoothstep(0.0,0.35,min(e.x,e.y));
+      gl_FragColor=vec4(vec3(1.0-${TINT_DARKNESS.toFixed(3)}*f),1.0);}`,
+  })
+  materials.push(tintMaterial)
+  const tint = decor(
+    new Mesh(geo(new PlaneGeometry(spanX + TINT_MARGIN_X, spanZ + TINT_MARGIN_Z)), tintMaterial),
+  )
+  tint.rotation.x = -Math.PI / 2
+  tint.position.set(center.x, -0.02, center.z)
+
+  const embankmentMaterial = tone(EMBANKMENT_DARKNESS)
+  const embankment = (a: Point2, b: Point2) => {
     const dx = b[0] - a[0]
     const dz = b[1] - a[1]
-    const mesh = new Mesh(geo(new BoxGeometry(Math.hypot(dx, dz), 0.07, width)), basic(color))
+    const mesh = decor(
+      new Mesh(
+        geo(new BoxGeometry(Math.hypot(dx, dz), 0.01, EMBANKMENT_WIDTH)),
+        embankmentMaterial,
+      ),
+    )
+    mesh.position.set((a[0] + b[0]) / 2, -0.01, (a[1] + b[1]) / 2)
+    mesh.rotation.y = -Math.atan2(dz, dx)
+  }
+  const haloGeometry = geo(new CylinderGeometry(STATION_HALO_RADIUS, STATION_HALO_RADIUS, 0.01, 48))
+  const haloMaterial = tone(STATION_HALO_DARKNESS)
+  const dimMaterial = tone(DIM_DARKNESS)
+
+  const bar = (a: Point2, b: Point2, material: MeshBasicMaterial, width = 0.13) => {
+    const dx = b[0] - a[0]
+    const dz = b[1] - a[1]
+    const mesh = new Mesh(geo(new BoxGeometry(Math.hypot(dx, dz), 0.07, width)), material)
     mesh.position.set((a[0] + b[0]) / 2, 0.035, (a[1] + b[1]) / 2)
     mesh.rotation.y = -Math.atan2(dz, dx)
-    scene.add(mesh)
+    if (material === dimMaterial) decor(mesh)
+    else scene.add(mesh)
   }
   const jointGeometry = geo(new CylinderGeometry(0.065, 0.065, 0.07, 24))
-  const joint = (p: Point2, color: number) => {
-    const mesh = new Mesh(jointGeometry, basic(color))
+  const blueMaterial = basic(BLUE)
+  const joint = (p: Point2, material: MeshBasicMaterial) => {
+    const mesh = new Mesh(jointGeometry, material)
     mesh.position.set(p[0], 0.035, p[1])
-    scene.add(mesh)
+    if (material === dimMaterial) decor(mesh)
+    else scene.add(mesh)
   }
 
   // Tracks: blue, dimmed during an incident, red dashes (blinking) when broken.
@@ -187,8 +228,10 @@ export function createLinePlan(
     for (let i = 0; i < track.points.length - 1; i++) {
       const a = track.points[i]!
       const b = track.points[i + 1]!
+      // Dimmed tracks get no embankment: their own faded dots must stand out from the tint.
+      if (!track.dim) embankment(a, b)
       if (!track.broken) {
-        bar(a, b, track.dim ? DIM : BLUE)
+        bar(a, b, track.dim ? dimMaterial : blueMaterial)
         continue
       }
       const dx = b[0] - a[0]
@@ -209,13 +252,13 @@ export function createLinePlan(
       t.points.some((p) => Math.abs(p[0] - j[0]) < 1e-6 && Math.abs(p[1] - j[1]) < 1e-6),
     )
     if (on.length > 0 && on.every((t) => t.broken)) continue
-    joint(j, on.length > 0 && on.every((t) => t.dim) ? DIM : BLUE)
+    joint(j, on.length > 0 && on.every((t) => t.dim) ? dimMaterial : blueMaterial)
   }
 
-  // Stations: two-tone status ring around a white disc.
+  // Stations: two-tone status ring around a paper disc.
   const outerGeometry = geo(new CylinderGeometry(0.3, 0.3, 0.18, 48))
   const innerGeometry = geo(new CylinderGeometry(0.16, 0.16, 0.2, 48))
-  const innerMaterials = [basic(0xe6e9f0), basic(0xffffff), basic(0xffffff)]
+  const innerMaterials = [basic(0xe2dccb), basic(PAPER), basic(PAPER)]
   const pulseGeometry = geo(new RingGeometry(0.3, 0.34, 64))
   const pulses: Mesh<RingGeometry, MeshBasicMaterial>[] = []
   const pickable: Mesh[] = []
@@ -223,6 +266,7 @@ export function createLinePlan(
   for (const s of layout.stations) {
     const [light, dark] = STATUS_COLORS[s.status]
     stationPos.set(s.id, [s.x, s.z])
+    decor(new Mesh(haloGeometry, haloMaterial)).position.set(s.x, -0.005, s.z)
     const outer = new Mesh(outerGeometry, [basic(dark), basic(light), basic(dark)])
     outer.position.set(s.x, 0.09, s.z)
     outer.userData.stationId = s.id
@@ -305,7 +349,10 @@ export function createLinePlan(
     camera.lookAt(center.x, 0, center.z)
     camera.updateMatrixWorld()
   }
+  const bufferSize = new Vector2()
   renderer.setSize(size.w, size.h, false)
+  renderer.getDrawingBufferSize(bufferSize)
+  halftone.setSize(bufferSize.x, bufferSize.y)
   updateProjection()
   updatePose()
 
@@ -370,6 +417,8 @@ export function createLinePlan(
     const moved = Math.abs(view.elev - pe) + Math.abs(view.azim - pa) > 0.001
     if (moved) updatePose()
     animate(t)
+    halftone.render(scene, camera)
+    renderer.clearDepth()
     renderer.render(scene, camera)
     renderOnce = false
     if (moved || notify) {
@@ -466,6 +515,8 @@ export function createLinePlan(
       if (w <= 0 || h <= 0) return
       size = { w, h }
       renderer.setSize(w, h, false)
+      renderer.getDrawingBufferSize(bufferSize)
+      halftone.setSize(bufferSize.x, bufferSize.y)
       updateProjection()
       notify = true
       requestFrame()
@@ -483,6 +534,7 @@ export function createLinePlan(
       listeners.clear()
       geometries.forEach((g) => g.dispose())
       materials.forEach((m) => m.dispose())
+      halftone.dispose()
       renderer.dispose()
       renderer.forceContextLoss()
     },
