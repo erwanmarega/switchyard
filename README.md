@@ -118,7 +118,7 @@ Le bleu a aussi un rôle fonctionnel : neutre, il ne se confond pas avec les **c
 
 ## Feuille de route
 
-- [ ] Cœur de l'application : système de plugins, stockage chiffré des tokens
+- [x] Cœur de l'application : système de plugins, stockage chiffré des tokens
 - [ ] Affichage du graphe du projet
 - [ ] Intégration Vercel
 - [ ] Intégration Stripe
@@ -161,7 +161,7 @@ npm run dev        # app web (3000) : landing + dashboard, et API (3001)
 
 L'application web (`apps/web`, port 3000) regroupe la landing (`/`), la page de connexion (`/connexion`) et le dashboard protégé (`/dashboard`). L'inscription et la connexion passent par les routes serveur `/auth/*` de l'application web (`login`, `signup`, `logout`, `session`), qui appellent Supabase Auth ; la session vit dans des cookies `HttpOnly` que le navigateur ne peut pas lire, et il ne parle jamais à Supabase. Le navigateur ne parle qu'à `http://localhost:3000` pour l'API : l'application relaie les appels `/api/*` vers l'API (port 3001) en y ajoutant le jeton d'accès Supabase (`Authorization: Bearer`), que l'API vérifie localement grâce aux clés publiques (JWKS) de Supabase. Les cookies de session ne sont jamais transmis à l'API.
 
-Les fichiers `.env` (ignorés par Git) sont générés par `npm run db:env` ; voir `apps/api/.env.example` et `apps/web/.env.example` pour la liste des variables (`SUPABASE_URL`, `SUPABASE_KEY` côté web, lues par le serveur uniquement et, en production, `NUXT_SUPABASE_URL` / `NUXT_SUPABASE_KEY` ; `DATABASE_URL`, `SUPABASE_URL` côté API). La clé `SUPABASE_KEY` est la clé publiable (publique par conception).
+Les fichiers `.env` (ignorés par Git) sont générés par `npm run db:env` ; voir `apps/api/.env.example` et `apps/web/.env.example` pour la liste des variables (`SUPABASE_URL`, `SUPABASE_KEY` côté web, lues par le serveur uniquement et, en production, `NUXT_SUPABASE_URL` / `NUXT_SUPABASE_KEY` ; `DATABASE_URL`, `SUPABASE_URL`, `SWITCHYARD_ENCRYPTION_KEY` côté API). La clé `SUPABASE_KEY` est la clé publiable (publique par conception).
 
 ### Sécurité / déploiement
 
@@ -179,17 +179,18 @@ Les fichiers `.env` (ignorés par Git) sont générés par `npm run db:env` ; vo
 - Durée de session : le `Max-Age` du cookie (8 h) est glissant, réarmé à chaque rafraîchissement : ce n'est pas une durée de vie absolue. Pour borner la session, activez côté Supabase le time-box (`[auth.sessions] timebox`) et l'inactivité (`inactivity_timeout`).
 - Rafraîchissement concurrent : plusieurs requêtes simultanées peuvent rafraîchir le même jeton. `refresh_token_reuse_interval` (10 s dans `supabase/config.toml`) doit rester > 0, sinon la perdante invaliderait la session. De plus, une requête dont le rafraîchissement échoue est traitée comme anonyme sans supprimer les cookies : seul `/auth/logout` les supprime.
 - Confirmation d'e-mail : gardez-la TOUJOURS activée en production. Sans elle, l'inscription révèle l'existence d'un compte (« Un compte existe déjà ») et connecte immédiatement. Le lien de confirmation arrive sur `/auth/callback` (échange du code puis redirection) : ajoutez `<origine>/auth/callback` aux URL de redirection autorisées (déjà fait en local dans `supabase/config.toml`).
-- Avant la première table métier : créez un rôle de base de données dédié à l'API, à moindres privilèges, avec accès uniquement au schéma `switchyard`, activez la RLS avec une politique sur `user_id`, et filtrez chaque requête par `request.user.id`.
+- Isolation des données, en deux couches : chaque accès de l'API passe par une transaction qui bascule sur le rôle `switchyard_api` (`set local role`, `NOLOGIN`, sans `BYPASSRLS`, uniquement `select`/`insert`/`update`/`delete` sur les tables du schéma `switchyard`) et fixe `switchyard.user_id` ; la RLS (activée et forcée sur toutes les tables) ne laisse voir que les lignes de cet utilisateur. Chaque requête filtre en plus explicitement par `user_id`. Une ressource d'un autre utilisateur, inexistante ou à l'identifiant mal formé renvoie la même 404. Toute nouvelle table suit le même modèle (RLS forcée, politique sur `user_id`, droits limités pour `switchyard_api`). En production, vous pouvez aussi donner un mot de passe au rôle (`alter role switchyard_api login password '…'`, hors du dépôt) et l'utiliser directement dans `DATABASE_URL`.
+- Tokens des intégrations : les champs marqués `secret` sont chiffrés au repos en AES-256-GCM (IV aléatoire, chiffré lié à la connexion et à l'utilisateur) avec `SWITCHYARD_ENCRYPTION_KEY` (32 octets aléatoires en base64, obligatoire). `npm run db:env` la génère en local sans jamais écraser une clé existante ; en production : `openssl rand -base64 32`. **Sauvegardez-la hors de la base : si elle est perdue ou changée, les tokens stockés sont irrécupérables** et les connexions doivent être ressaisies. Aucune route ne renvoie un token ni son chiffré.
 - Gardez le port de l'API (y compris `/health`) interne : seul l'app web doit pouvoir l'atteindre.
 - Définissez `ALLOWED_ORIGINS` sur l'origine publique de l'application web, ainsi que `SUPABASE_URL` et `DATABASE_URL` vers votre projet. L'API affiche des avertissements au démarrage en production si la configuration reste celle du développement.
 
 ### Workspaces
 
-| Workspace             | Rôle                                                                | Port |
-| --------------------- | ------------------------------------------------------------------- | ---- |
-| `apps/web`            | Landing, connexion et dashboard (Nuxt + Vue Flow)                   | 3000 |
-| `apps/api`            | API (Fastify) : `/health`, `/api/me`, `/api/integrations`           | 3001 |
-| `packages/plugin-sdk` | Interface commune des intégrations (vérifications en lecture seule) | -    |
+| Workspace             | Rôle                                                                                            | Port |
+| --------------------- | ----------------------------------------------------------------------------------------------- | ---- |
+| `apps/web`            | Landing, connexion et dashboard (Nuxt + Vue Flow)                                               | 3000 |
+| `apps/api`            | API (Fastify) : `/health`, `/api/me`, `/api/integrations`, `/api/projects` (connexions, chemin) | 3001 |
+| `packages/plugin-sdk` | Interface commune des intégrations (vérifications en lecture seule)                             | -    |
 
 ### Scripts principaux
 

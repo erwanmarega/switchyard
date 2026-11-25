@@ -11,6 +11,8 @@ import { buildApp } from '../src/app.js'
 import { createTokenVerifier } from '../src/auth/jwt.js'
 import { loadConfig, type Config } from '../src/config.js'
 import type { Database } from '../src/db/index.js'
+import type { Store } from '../src/store/types.js'
+import { createMemoryStore } from './support/memory-store.js'
 
 export const SUPABASE_URL = 'http://127.0.0.1:54321'
 export const ISSUER = `${SUPABASE_URL}/auth/v1`
@@ -20,6 +22,8 @@ export const USER_ID = '6eead7eb-f9d4-4df1-954a-e948a33e2e6b'
 export const TEST_ENV = {
   DATABASE_URL: 'postgresql://test:test@127.0.0.1:1/test',
   SUPABASE_URL,
+  // Test-only key (32 bytes of a constant pattern). Never use it anywhere else.
+  SWITCHYARD_ENCRYPTION_KEY: Buffer.alloc(32, 0x42).toString('base64'),
 }
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -76,13 +80,18 @@ export async function signToken(signer: Signer, o: TokenOptions = {}): Promise<s
   return jwt.sign(signer.privateKey)
 }
 
-export function testApp(signer: Signer, db: Database = fakeDb(), env: Record<string, string> = {}) {
+export function testApp(
+  signer: Signer,
+  db: Database = fakeDb(),
+  env: Record<string, string> = {},
+  store: Store = createMemoryStore(),
+) {
   const config = testConfig(env)
   const verifyToken = createTokenVerifier(
     config.SUPABASE_URL,
     createLocalJWKSet({ keys: [signer.jwk] }),
   )
-  return buildApp({ config, db, verifyToken })
+  return buildApp({ config, db, verifyToken, store })
 }
 
 export const randomId = () => randomUUID()

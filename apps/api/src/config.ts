@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseEncryptionKey } from './crypto/secrets.js'
 
 export const DEFAULT_ALLOWED_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
 
@@ -38,6 +39,25 @@ const baseSchema = z.object({
     .string({ error: 'SUPABASE_URL is required: copy apps/api/.env.example to apps/api/.env' })
     .refine((v) => URL.canParse(v), 'SUPABASE_URL must be a valid URL')
     .transform((v) => v.replace(/\/+$/, '')),
+  // 32 random bytes, standard base64. Encrypts integration tokens at rest. Exposed as a Buffer.
+  // The value is never echoed in error messages.
+  SWITCHYARD_ENCRYPTION_KEY: z
+    .string({
+      error:
+        'SWITCHYARD_ENCRYPTION_KEY is required: run `npm run db:env` or generate one with `openssl rand -base64 32`',
+    })
+    .transform((v, ctx) => {
+      try {
+        return parseEncryptionKey(v)
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'SWITCHYARD_ENCRYPTION_KEY must be 32 random bytes in base64: run `npm run db:env` or generate one with `openssl rand -base64 32`',
+        })
+        return z.NEVER
+      }
+    }),
   // Comma-separated list of origins allowed to call state-changing routes.
   ALLOWED_ORIGINS: commaList(DEFAULT_ALLOWED_ORIGINS),
   // Comma-separated proxies (IPs/CIDRs) whose X-Forwarded-For is trusted (the web app's proxy).

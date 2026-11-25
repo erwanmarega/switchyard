@@ -12,6 +12,7 @@ import {
   testConfig,
   type Signer,
 } from './helpers.js'
+import { createMemoryStore } from './support/memory-store.js'
 
 let signer: Signer
 let app: FastifyInstance
@@ -83,6 +84,7 @@ describe('error handler', () => {
     const failing = buildApp({
       config: testConfig(),
       db: fakeDb(),
+      store: createMemoryStore(),
       verifyToken: async () => {
         throw new Error('boom: postgresql://secret@host')
       },
@@ -117,6 +119,7 @@ describe('loadConfig', () => {
       DATABASE_URL: TEST_ENV.DATABASE_URL,
       DATABASE_SSL: 'disable',
       SUPABASE_URL: TEST_ENV.SUPABASE_URL,
+      SWITCHYARD_ENCRYPTION_KEY: Buffer.from(TEST_ENV.SWITCHYARD_ENCRYPTION_KEY, 'base64'),
       ALLOWED_ORIGINS: ['http://localhost:3000', 'http://127.0.0.1:3000'],
       TRUST_PROXY: ['127.0.0.1', '::1'],
     })
